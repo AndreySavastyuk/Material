@@ -374,6 +374,30 @@ class SessionExpiredError(AuthenticationError):
         return "Сессия истекла. Необходимо войти в систему заново."
 
 
+class SecurityError(AuthenticationError):
+    """Ошибки безопасности (brute force, подозрительная активность и т.д.)."""
+    
+    def __init__(
+        self,
+        message: str,
+        security_reason: str = None,
+        **kwargs
+    ):
+        kwargs.setdefault('severity', ErrorSeverity.HIGH)
+        kwargs.setdefault('category', ErrorCategory.AUTHORIZATION)
+        
+        # Устанавливаем атрибуты до вызова super().__init__
+        self.security_reason = security_reason
+        
+        super().__init__(message, **kwargs)
+        
+        if security_reason:
+            self.details['security_reason'] = security_reason
+    
+    def _generate_user_message(self) -> str:
+        return "Обнаружена подозрительная активность. Доступ ограничен."
+
+
 # =============================================================================
 # Сетевые ошибки
 # =============================================================================

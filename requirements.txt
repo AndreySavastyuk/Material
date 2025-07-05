@@ -1,6 +1,10 @@
-PyQt5>=5.15.9
+PyQt5==5.15.11
 configparser
 python-telegram-bot>=13.7
 fpdf2
 qrcode[pil]
-bcrypt>=4.0.1
+bcrypt==4.2.1
+reportlab==4.2.5
+requests==2.32.3
+Jinja2==3.1.4
+MarkupSafe==2.1.5

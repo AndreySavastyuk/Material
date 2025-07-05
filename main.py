@@ -80,8 +80,11 @@ def main():
         login_dialog = LoginDialog(auth_service)
         if login_dialog.exec_() == LoginDialog.Accepted:
             user = login_dialog.get_authenticated_user()
-            session_token = login_dialog.get_session_token()
-            logger.info(f"Пользователь авторизован: {user['login']}, токен сессии: {session_token[:10]}...")
+            session_token = user.get('session_token')
+            if session_token:
+                logger.info(f"Пользователь авторизован: {user['login']}, токен сессии: {session_token[:10]}...")
+            else:
+                logger.info(f"Пользователь авторизован: {user['login']}")
         else:
             logger.info("Авторизация отменена пользователем")
             sys.exit(0)

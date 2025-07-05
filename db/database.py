@@ -22,6 +22,19 @@ class Database:
         doc_cfg = cfg.get('DOCUMENTS', {})
         self.docs_root = doc_cfg.get('root_path', os.path.join(os.getcwd(), 'docs'))
         self.conn = None
+        self._materials_repository = None
+
+    @property
+    def materials_repository(self):
+        """Ленивое создание MaterialsRepository."""
+        if self._materials_repository is None and self.conn:
+            try:
+                from repositories.materials_repository import MaterialsRepository
+                self._materials_repository = MaterialsRepository(self.conn, self.docs_root)
+                logger.info("MaterialsRepository инициализирован")
+            except ImportError as e:
+                logger.warning(f"Не удалось загрузить MaterialsRepository: {e}")
+        return self._materials_repository
 
     def connect(self):
         """
@@ -476,13 +489,18 @@ class Database:
 
     def get_materials(self):
         """
-        Возвращает список sqlite3.Row с полями:
-        id, arrival_date, supplier, order_num, grade, rolling_type,
-        size, cert_num, cert_date, batch, heat_num,
-        volume_length_mm, volume_weight_kg,
-        otk_remarks, needs_lab, to_delete
-        (поля, отсутствующие в таблице, подставляются пустыми строками или нулями)
+        Возвращает список материалов с данными из связанных таблиц.
+        Использует MaterialsRepository если доступен, иначе старый метод.
         """
+        if self.materials_repository:
+            try:
+                return self.materials_repository.get_materials_with_relations()
+            except Exception as e:
+                logger.error(f"Ошибка в MaterialsRepository: {e}")
+                # Fallback к старому методу
+                pass
+        
+        # Старый метод как fallback
         cur = self.conn.cursor()
         # Определяем существующие колонки в Materials
         existing = {c['name'] for c in cur.execute("PRAGMA table_info(Materials)")}
@@ -524,6 +542,33 @@ class Database:
                      grade_id, rolling_type_id, size,
                      cert_num, cert_date, batch,
                      heat_num, volume_length_mm, volume_weight_kg):
+        """
+        Добавляет новый материал.
+        Использует MaterialsRepository если доступен, иначе старый метод.
+        """
+        if self.materials_repository:
+            try:
+                material_data = {
+                    'arrival_date': arrival_date,
+                    'supplier_id': supplier_id,
+                    'order_num': order_num,
+                    'grade_id': grade_id,
+                    'rolling_type_id': rolling_type_id,
+                    'size': size,
+                    'cert_num': cert_num,
+                    'cert_date': cert_date,
+                    'batch': batch,
+                    'heat_num': heat_num,
+                    'volume_length_mm': volume_length_mm,
+                    'volume_weight_kg': volume_weight_kg
+                }
+                return self.materials_repository.create_material(material_data)
+            except Exception as e:
+                logger.error(f"Ошибка в MaterialsRepository: {e}")
+                # Fallback к старому методу
+                pass
+        
+        # Старый метод как fallback
         cur = self.conn.cursor()
         cur.execute(
             '''
@@ -543,6 +588,19 @@ class Database:
         return cur.lastrowid
 
     def update_material(self, mid, **kwargs):
+        """
+        Обновляет материал.
+        Использует MaterialsRepository если доступен, иначе старый метод.
+        """
+        if self.materials_repository:
+            try:
+                return self.materials_repository.update_material(mid, kwargs)
+            except Exception as e:
+                logger.error(f"Ошибка в MaterialsRepository: {e}")
+                # Fallback к старому методу
+                pass
+        
+        # Старый метод как fallback
         fields = ', '.join(f"{k}=?" for k in kwargs)
         vals = list(kwargs.values()) + [mid]
         cur = self.conn.cursor()
@@ -550,11 +608,37 @@ class Database:
         self.conn.commit()
 
     def get_documents(self, material_id):
+        """
+        Получает документы материала.
+        Использует MaterialsRepository если доступен, иначе старый метод.
+        """
+        if self.materials_repository:
+            try:
+                return self.materials_repository.get_documents(material_id)
+            except Exception as e:
+                logger.error(f"Ошибка в MaterialsRepository: {e}")
+                # Fallback к старому методу
+                pass
+        
+        # Старый метод как fallback
         cur = self.conn.cursor()
         cur.execute('SELECT * FROM Documents WHERE material_id=?', (material_id,))
         return cur.fetchall()
 
     def add_document(self, material_id, doc_type, src_path, uploaded_by):
+        """
+        Добавляет документ к материалу.
+        Использует MaterialsRepository если доступен, иначе старый метод.
+        """
+        if self.materials_repository:
+            try:
+                return self.materials_repository.add_document(material_id, doc_type, src_path, uploaded_by)
+            except Exception as e:
+                logger.error(f"Ошибка в MaterialsRepository: {e}")
+                # Fallback к старому методу
+                pass
+        
+        # Старый метод как fallback
         folder = os.path.join(self.docs_root, str(material_id))
         os.makedirs(folder, exist_ok=True)
         fname = os.path.basename(src_path)
@@ -580,14 +664,51 @@ class Database:
         return cur.lastrowid
 
     def mark_material_for_deletion(self, material_id):
-        """Пометить материал на удаление (soft delete)."""
+        """
+        Помечает материал на удаление (soft delete).
+        Использует MaterialsRepository если доступен, иначе старый метод.
+        """
+        if self.materials_repository:
+            try:
+                return self.materials_repository.mark_for_deletion(material_id)
+            except Exception as e:
+                logger.error(f"Ошибка в MaterialsRepository: {e}")
+                # Fallback к старому методу
+                pass
+        
+        # Старый метод как fallback
         self.update_material(material_id, to_delete=1)
 
     def unmark_material(self, material_id):
-        """Снять метку удаления."""
+        """
+        Снимает метку удаления с материала.
+        Использует MaterialsRepository если доступен, иначе старый метод.
+        """
+        if self.materials_repository:
+            try:
+                return self.materials_repository.unmark_for_deletion(material_id)
+            except Exception as e:
+                logger.error(f"Ошибка в MaterialsRepository: {e}")
+                # Fallback к старому методу
+                pass
+        
+        # Старый метод как fallback
         self.update_material(material_id, to_delete=0)
 
     def get_marked_for_deletion(self):
+        """
+        Получает материалы, помеченные на удаление.
+        Использует MaterialsRepository если доступен, иначе старый метод.
+        """
+        if self.materials_repository:
+            try:
+                return self.materials_repository.get_marked_for_deletion()
+            except Exception as e:
+                logger.error(f"Ошибка в MaterialsRepository: {e}")
+                # Fallback к старому методу
+                pass
+        
+        # Старый метод как fallback
         cur = self.conn.cursor()
         cur.execute('''
             SELECT m.id, m.arrival_date, s.name AS supplier, m.order_num
@@ -599,18 +720,38 @@ class Database:
         return cur.fetchall()
 
     def permanently_delete_material(self, material_id):
-        """Физически удалить материал и связанные документы."""
+        """
+        Физически удаляет материал и связанные документы.
+        Использует MaterialsRepository если доступен, иначе старый метод.
+        """
+        if self.materials_repository:
+            try:
+                return self.materials_repository.permanently_delete_material(material_id)
+            except Exception as e:
+                logger.error(f"Ошибка в MaterialsRepository: {e}")
+                # Fallback к старому методу
+                pass
+        
+        # Старый метод как fallback
         self.conn.execute('DELETE FROM Documents WHERE material_id=?', (material_id,))
         self.conn.execute('DELETE FROM Materials WHERE id=?', (material_id,))
         self.conn.commit()
 
     def acquire_lock(self, material_id: int, user_login: str) -> bool:
         """
-        Попытаться захватить блокировку на material_id.
-        Возвращает True, если успешно, False — если уже заблокировано.
+        Захватывает блокировку на материал.
+        Использует MaterialsRepository если доступен, иначе старый метод.
         """
+        if self.materials_repository:
+            try:
+                return self.materials_repository.acquire_lock(material_id, user_login)
+            except Exception as e:
+                logger.error(f"Ошибка в MaterialsRepository: {e}")
+                # Fallback к старому методу
+                pass
+        
+        # Старый метод как fallback
         cur = self.conn.cursor()
-        # проверяем, есть ли уже запись
         cur.execute("SELECT locked_by FROM RecordLocks WHERE material_id=?", (material_id,))
         row = cur.fetchone()
         if row:
@@ -625,8 +766,18 @@ class Database:
 
     def release_lock(self, material_id: int, user_login: str):
         """
-        Освободить блокировку, если её держит этот пользователь.
+        Освобождает блокировку материала.
+        Использует MaterialsRepository если доступен, иначе старый метод.
         """
+        if self.materials_repository:
+            try:
+                return self.materials_repository.release_lock(material_id, user_login)
+            except Exception as e:
+                logger.error(f"Ошибка в MaterialsRepository: {e}")
+                # Fallback к старому методу
+                pass
+        
+        # Старый метод как fallback
         cur = self.conn.cursor()
         cur.execute(
             "DELETE FROM RecordLocks WHERE material_id=? AND locked_by=?",
@@ -636,9 +787,18 @@ class Database:
 
     def is_locked(self, material_id: int) -> (bool, str):
         """
-        Вернёт (True, login) если материал заблокирован другим пользователем,
-        иначе (False, '').
+        Проверяет, заблокирован ли материал.
+        Использует MaterialsRepository если доступен, иначе старый метод.
         """
+        if self.materials_repository:
+            try:
+                return self.materials_repository.is_locked(material_id)
+            except Exception as e:
+                logger.error(f"Ошибка в MaterialsRepository: {e}")
+                # Fallback к старому методу
+                pass
+        
+        # Старый метод как fallback
         cur = self.conn.cursor()
         cur.execute("SELECT locked_by FROM RecordLocks WHERE material_id=?", (material_id,))
         row = cur.fetchone()

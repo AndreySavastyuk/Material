@@ -14,6 +14,12 @@ from gui.lab.pdf_generator import generate_pdf_for_request
 from gui.lab.telegram_notifier import notify_request_passed, notify_material_defect
 from gui.lab.request_editor import RequestEditor
 from gui.lab.specimen_catalog import SpecimenCatalogDialog
+from services.protocol_template_service import ProtocolTemplateService
+from gui.lab.template_editor import TemplateManager
+from gui.lab.template_preview import show_protocol_preview
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class LabWindow(QMainWindow):
@@ -23,6 +29,9 @@ class LabWindow(QMainWindow):
         super().__init__(parent)
         self.user = parent.user
         self.db = Database(); self.db.connect()
+        
+        # Инициализация сервиса шаблонов
+        self.template_service = ProtocolTemplateService(self.db.conn)
 
         self.setWindowTitle('Модуль лаборатории (ЦЗЛ)')
         self.resize(900, 600)
@@ -33,10 +42,27 @@ class LabWindow(QMainWindow):
 
     def _build_ui(self):
         mb = self.menuBar()
+        
+        # Меню "Файл"
         file_menu = mb.addMenu('Файл')
         file_menu.addAction('Справочник образцов', lambda: SpecimenCatalogDialog(self).exec_())
         file_menu.addSeparator()
         file_menu.addAction('Закрыть', self.close)
+        
+        # Меню "Шаблоны"
+        templates_menu = mb.addMenu('Шаблоны')
+        templates_menu.addAction('Управление шаблонами', self._manage_templates)
+        templates_menu.addSeparator()
+        templates_menu.addAction('Создать шаблон', self._create_template)
+        templates_menu.addAction('Импорт шаблонов', self._import_templates)
+        templates_menu.addAction('Экспорт шаблонов', self._export_templates)
+        
+        # Меню "Отчеты"
+        reports_menu = mb.addMenu('Отчеты')
+        reports_menu.addAction('Генерация протокола', self._generate_protocol_from_selection)
+        reports_menu.addAction('Массовая генерация', self._batch_generate_protocols)
+        reports_menu.addSeparator()
+        reports_menu.addAction('Статистика по шаблонам', self._show_template_statistics)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -193,18 +219,23 @@ class LabWindow(QMainWindow):
             return
         rec = self.filtered[row]
         menu = QMenu(self)
-        menu.addAction('Изменить статус',
-                       lambda: self._change_status(rec))
+        
+        menu.addAction('Изменить статус', lambda: self._change_status(rec))
         menu.addSeparator()
-        menu.addAction('Редактировать сценарий',
-                       lambda: self._guard_dialog(self._edit_scenario, rec))
-        menu.addAction('Редактировать результаты',
-                       lambda: self._guard_dialog(self._edit_results, rec))
+        menu.addAction('Редактировать сценарий', lambda: self._guard_dialog(self._edit_scenario, rec))
+        menu.addAction('Редактировать результаты', lambda: self._guard_dialog(self._edit_results, rec))
         menu.addSeparator()
-        menu.addAction('Экспорт в PDF',
-                       lambda: self._guard_dialog(self._export_pdf, rec))
-        menu.addAction('Отправить в Telegram',
-                       lambda: self._guard_dialog(self._send_to_telegram, rec))
+        
+        # Новые пункты меню для шаблонов
+        templates_submenu = menu.addMenu('Протоколы')
+        templates_submenu.addAction('Генерировать по шаблону', lambda: self._generate_protocol_for_request(rec))
+        templates_submenu.addAction('Предварительный просмотр', lambda: self._preview_protocol_for_request(rec))
+        templates_submenu.addSeparator()
+        templates_submenu.addAction('Экспорт в PDF (старый)', lambda: self._guard_dialog(self._export_pdf, rec))
+        
+        menu.addSeparator()
+        menu.addAction('Отправить в Telegram', lambda: self._guard_dialog(self._send_to_telegram, rec))
+        
         menu.exec_(self.tbl.viewport().mapToGlobal(pos))
 
     def _change_status(self, rec: dict):
@@ -342,6 +373,131 @@ class LabWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, 'Ошибка Telegram', str(e))
 
+    # Новые методы для работы с шаблонами
+    def _manage_templates(self):
+        """Открытие менеджера шаблонов."""
+        try:
+            dialog = TemplateManager(self.template_service, self)
+            dialog.exec_()
+        except Exception as e:
+            logger.error(f"Ошибка открытия менеджера шаблонов: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось открыть менеджер шаблонов: {e}")
+
+    def _create_template(self):
+        """Создание нового шаблона."""
+        try:
+            from gui.lab.template_editor import TemplateEditor
+            dialog = TemplateEditor(self.template_service, parent=self)
+            dialog.exec_()
+        except Exception as e:
+            logger.error(f"Ошибка создания шаблона: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось создать шаблон: {e}")
+
+    def _generate_protocol_from_selection(self):
+        """Генерация протокола для выбранной заявки."""
+        current_row = self.tbl.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "Предупреждение", "Выберите заявку для генерации протокола")
+            return
+        
+        rec = self.filtered[current_row]
+        self._generate_protocol_for_request(rec)
+
+    def _generate_protocol_for_request(self, rec: dict):
+        """Генерация протокола для конкретной заявки."""
+        try:
+            show_protocol_preview(self.template_service, rec, self)
+        except Exception as e:
+            logger.error(f"Ошибка генерации протокола: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сгенерировать протокол: {e}")
+
+    def _preview_protocol_for_request(self, rec: dict):
+        """Предварительный просмотр протокола для заявки."""
+        try:
+            show_protocol_preview(self.template_service, rec, self)
+        except Exception as e:
+            logger.error(f"Ошибка предварительного просмотра: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось показать предварительный просмотр: {e}")
+
+    def _batch_generate_protocols(self):
+        """Массовая генерация протоколов."""
+        try:
+            # Получаем все заявки с определенным статусом
+            completed_requests = [r for r in self.filtered if r['status'] == 'ППСД пройден']
+            
+            if not completed_requests:
+                QMessageBox.information(self, "Информация", "Нет заявок со статусом 'ППСД пройден'")
+                return
+            
+            reply = QMessageBox.question(
+                self, "Массовая генерация", 
+                f"Сгенерировать протоколы для {len(completed_requests)} заявок?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                # Здесь можно добавить диалог выбора шаблона и параметров
+                QMessageBox.information(self, "В разработке", "Функция массовой генерации в разработке")
+                
+        except Exception as e:
+            logger.error(f"Ошибка массовой генерации: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить массовую генерацию: {e}")
+
+    def _import_templates(self):
+        """Импорт шаблонов из файла."""
+        try:
+            from PyQt5.QtWidgets import QFileDialog
+            
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, "Выбор файла шаблонов", "", "JSON files (*.json)"
+            )
+            
+            if file_path:
+                # Здесь можно добавить логику импорта
+                QMessageBox.information(self, "В разработке", "Функция импорта шаблонов в разработке")
+                
+        except Exception as e:
+            logger.error(f"Ошибка импорта шаблонов: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать шаблоны: {e}")
+
+    def _export_templates(self):
+        """Экспорт шаблонов в файл."""
+        try:
+            from PyQt5.QtWidgets import QFileDialog
+            
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Сохранение шаблонов", "templates.json", "JSON files (*.json)"
+            )
+            
+            if file_path:
+                # Здесь можно добавить логику экспорта
+                QMessageBox.information(self, "В разработке", "Функция экспорта шаблонов в разработке")
+                
+        except Exception as e:
+            logger.error(f"Ошибка экспорта шаблонов: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось экспортировать шаблоны: {e}")
+
+    def _show_template_statistics(self):
+        """Показ статистики по использованию шаблонов."""
+        try:
+            templates = self.template_service.get_all_templates()
+            
+            stats_text = "Статистика по шаблонам:\n\n"
+            for template in templates:
+                stats_text += f"• {template['name']}\n"
+                stats_text += f"  Категория: {template['category']}\n"
+                stats_text += f"  Версия: {template['version']}\n"
+                stats_text += f"  Активный: {'Да' if template['is_active'] else 'Нет'}\n\n"
+            
+            QMessageBox.information(self, "Статистика шаблонов", stats_text)
+            
+        except Exception as e:
+            logger.error(f"Ошибка получения статистики: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось получить статистику: {e}")
+
     def closeEvent(self, event):
-        self.db.close()
+        try:
+            self.db.close()
+        except:
+            pass
         super().closeEvent(event)

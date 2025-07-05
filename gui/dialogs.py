@@ -10,6 +10,8 @@ from PyQt5.QtCore import Qt, QDate, QEvent, QRegExp
 from PyQt5.QtGui import QDoubleValidator, QRegExpValidator
 
 from db.database import Database
+from services.materials_service import MaterialsService
+from repositories.materials_repository import MaterialsRepository
 from gui.volume_dialog import VolumeDialog
 
 
@@ -25,6 +27,11 @@ class AddMaterialDialog(QDialog):
         # подключение к базе
         self.db = Database()
         self.db.connect()
+        
+        # Инициализация сервиса материалов
+        self.materials_repo = MaterialsRepository(self.db.conn, self.db.docs_root)
+        self.materials_service = MaterialsService(self.materials_repo)
+        
         today = QDate.currentDate()
 
         # --- Поля формы ---
@@ -42,8 +49,13 @@ class AddMaterialDialog(QDialog):
         lbl_supplier = QLabel("Поставщик:")
         self.cmb_supplier = QComboBox()
         self.cmb_supplier.addItem("", None)
-        for sup in self.db.conn.execute("SELECT id, name FROM Suppliers"):
-            self.cmb_supplier.addItem(sup[1], sup[0])
+        # Используем сервис для получения поставщиков
+        try:
+            suppliers = self.materials_service.get_suppliers()
+            for supplier in suppliers:
+                self.cmb_supplier.addItem(supplier['name'], supplier['id'])
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка", f"Ошибка загрузки поставщиков: {str(e)}")
 
         # Номер заказа
         lbl_order = QLabel("Номер заказа:")
@@ -61,14 +73,16 @@ class AddMaterialDialog(QDialog):
         self.chk_custom = QCheckBox("Другое")
         self.cmb_custom_order = QComboBox()
         try:
-            rows = self.db.conn.execute("SELECT id, name FROM CustomOrders").fetchall()
-        except sqlite3.OperationalError:
-            rows = []
-        if rows:
-            for o in rows:
-                self.cmb_custom_order.addItem(o[1], o[0])
-            self.chk_custom.stateChanged.connect(self._toggle_order)
-        else:
+            custom_orders = self.materials_service.get_custom_orders()
+            if custom_orders:
+                for order in custom_orders:
+                    self.cmb_custom_order.addItem(order['name'], order['id'])
+                self.chk_custom.stateChanged.connect(self._toggle_order)
+            else:
+                self.chk_custom.setEnabled(False)
+                self.cmb_custom_order.setEnabled(False)
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка", f"Ошибка загрузки пользовательских заказов: {str(e)}")
             self.chk_custom.setEnabled(False)
             self.cmb_custom_order.setEnabled(False)
         self.cmb_custom_order.setFixedWidth(cw * 20)
@@ -76,16 +90,24 @@ class AddMaterialDialog(QDialog):
         # Марка материала (с плотностью)
         lbl_grade = QLabel("Марка материала:")
         self.cmb_grade = QComboBox()
-        for g in self.db.conn.execute("SELECT id, grade, density FROM Grades"):
-            self.cmb_grade.addItem(g[1], (g[0], g[2]))
+        try:
+            grades = self.materials_service.get_grades()
+            for grade in grades:
+                self.cmb_grade.addItem(grade['grade'], (grade['id'], grade['density']))
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка", f"Ошибка загрузки марок: {str(e)}")
 
         # Вид проката
         lbl_type = QLabel("Вид проката:")
         self.cmb_type = QComboBox()
-        info = self.db.conn.execute("PRAGMA table_info(RollingTypes)").fetchall()
-        col = info[1][1] if len(info) > 1 else (info[0][1] if info else "id")
-        for rt in self.db.conn.execute(f"SELECT id, {col} FROM RollingTypes"):
-            self.cmb_type.addItem(rt[1], rt[0])
+        try:
+            rolling_types = self.materials_service.get_rolling_types()
+            for rolling_type in rolling_types:
+                self.cmb_type.addItem(rolling_type['name'], rolling_type['id'])
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка", f"Ошибка загрузки видов проката: {str(e)}")
+        
+        # Устанавливаем "Круг" по умолчанию
         idx = self.cmb_type.findText("Круг")
         self.cmb_type.setCurrentIndex(idx if idx >= 0 else 0)
         self.cmb_type.currentTextChanged.connect(self._update_size_fields)
@@ -178,13 +200,21 @@ class AddMaterialDialog(QDialog):
         return super().eventFilter(obj, event)
 
     def _format_order(self, text):
-        digits = ''.join(ch for ch in text if ch.isdigit())[:7]
-        formatted = digits[:4]
-        if len(digits) > 4:
-            formatted += '/' + digits[4:]
-        self.le_order.blockSignals(True)
-        self.le_order.setText(formatted)
-        self.le_order.blockSignals(False)
+        """Форматирует номер заказа через сервис."""
+        try:
+            formatted = self.materials_service.format_order_number(text)
+            self.le_order.blockSignals(True)
+            self.le_order.setText(formatted)
+            self.le_order.blockSignals(False)
+        except Exception as e:
+            # Fallback к старой логике
+            digits = ''.join(ch for ch in text if ch.isdigit())[:7]
+            formatted = digits[:4]
+            if len(digits) > 4:
+                formatted += '/' + digits[4:]
+            self.le_order.blockSignals(True)
+            self.le_order.setText(formatted)
+            self.le_order.blockSignals(False)
 
     def _toggle_order(self, state):
         custom = state == Qt.Checked
@@ -192,6 +222,7 @@ class AddMaterialDialog(QDialog):
         self.cmb_custom_order.setEnabled(custom)
 
     def _update_size_fields(self):
+        """Обновляет поля размеров в зависимости от типа проката."""
         t = self.cmb_type.currentText()
         for w in (self.le_dim1, self.le_dim2):
             w.clear()
@@ -215,51 +246,89 @@ class AddMaterialDialog(QDialog):
             self.le_dim2.setEnabled(True)
 
     def _open_volume_dialog(self):
+        """Открывает диалог объема."""
         dlg = VolumeDialog(self, initial_data=self.volume_data)
         if dlg.exec_() == QDialog.Accepted:
             self.volume_data = dlg.get_data()
-            total_mm = sum(i['length'] * i['count'] for i in self.volume_data)
-            total_m  = total_mm / 1000
-            self.lbl_volume_info.setText(f"{total_mm:.0f} мм ({total_m:.2f} м)")
-            QMessageBox.information(self, "Объем", f"Общая длина: {total_m:.2f} м")
-            self._calculate_weight()
+            
+            # Обрабатываем данные объема через сервис
+            try:
+                volume_info = self.materials_service.process_volume_data(self.volume_data)
+                self.lbl_volume_info.setText(volume_info['display_text'])
+                QMessageBox.information(self, "Объем", volume_info['info_text'])
+                self._calculate_weight()
+            except Exception as e:
+                QMessageBox.warning(self, "Ошибка", f"Ошибка обработки объема: {str(e)}")
 
     def _calculate_weight(self):
-        grade = self.cmb_grade.currentData()
-        if not grade:
-            return
-        _, density = grade
-        t = self.cmb_type.currentText()
-        a1 = float(self.le_dim1.text() or 0) / 1000
-        a2 = float(self.le_dim2.text() or 0) / 1000
-        area = 0
-        if t in ("Круг", "Поковка"):
-            area = math.pi * (a1 / 2) ** 2
-        elif t == "Шестигранник":
-            area = 3 * math.sqrt(3) / 2 * (a1 ** 2)
-        elif t in ("Лист", "Плита"):
-            area = a1 * a2
-        elif t == "Труба":
-            outer = a1
-            wall  = a2
-            inner = outer - 2 * wall
-            area  = math.pi * (outer ** 2 - inner ** 2) / 4
+        """Рассчитывает вес материала через сервис."""
+        try:
+            grade_data = self.cmb_grade.currentData()
+            if not grade_data:
+                return
+            
+            grade_id, density = grade_data
+            rolling_type = self.cmb_type.currentText()
+            dim1 = float(self.le_dim1.text() or 0)
+            dim2 = float(self.le_dim2.text() or 0)
+            
+            if not self.volume_data:
+                return
+            
+            # Используем сервис для расчета веса
+            total_length_mm, total_weight_kg = self.materials_service.calculate_material_weight(
+                grade_id, rolling_type, (dim1, dim2), self.volume_data
+            )
+            
+            # Сохраняем для использования в data()
+            self.volume_length_mm = total_length_mm
+            self.volume_weight_kg = total_weight_kg
+            
+            # Обновляем отображение
+            weight_t = total_weight_kg / 1000
+            self.lbl_weight.setText(f"Вес партии - {weight_t:.3f} т.")
+            
+        except Exception as e:
+            # Fallback к старой логике расчета
+            try:
+                grade_data = self.cmb_grade.currentData()
+                if not grade_data:
+                    return
+                _, density = grade_data
+                t = self.cmb_type.currentText()
+                a1 = float(self.le_dim1.text() or 0) / 1000
+                a2 = float(self.le_dim2.text() or 0) / 1000
+                area = 0
+                if t in ("Круг", "Поковка"):
+                    area = math.pi * (a1 / 2) ** 2
+                elif t == "Шестигранник":
+                    area = 3 * math.sqrt(3) / 2 * (a1 ** 2)
+                elif t in ("Лист", "Плита"):
+                    area = a1 * a2
+                elif t == "Труба":
+                    outer = a1
+                    wall = a2
+                    inner = outer - 2 * wall
+                    area = math.pi * (outer ** 2 - inner ** 2) / 4
 
-        total_mm = sum(i['length'] * i['count'] for i in self.volume_data)
-        self.volume_length_mm = int(round(total_mm))
-        total_m = total_mm / 1000
-        weight_kg = area * total_m * density
-        self.volume_weight_kg = int(round(weight_kg))
-        weight_t = weight_kg / 1000
-        self.lbl_weight.setText(f"Вес партии - {weight_t:.3f} т.")
+                total_mm = sum(i['length'] * i['count'] for i in self.volume_data)
+                self.volume_length_mm = int(round(total_mm))
+                total_m = total_mm / 1000
+                weight_kg = area * total_m * density
+                self.volume_weight_kg = int(round(weight_kg))
+                weight_t = weight_kg / 1000
+                self.lbl_weight.setText(f"Вес партии - {weight_t:.3f} т.")
+            except Exception as fallback_error:
+                QMessageBox.warning(self, "Ошибка", f"Ошибка расчета веса: {str(fallback_error)}")
 
     def data(self):
+        """Возвращает данные формы."""
         return {
             'arrival_date': self.date_arrival.date().toString("yyyy-MM-dd"),
             'supplier_id': self.cmb_supplier.currentData(),
             'order_num': self.cmb_custom_order.currentText() if self.chk_custom.isChecked()
                          else self.le_order.text(),
-            'grade_id': self.cmb_grade.currentData()[0],
+            'grade_id': self.cmb_grade.currentData()[0] if self.cmb_grade.currentData() else None,
             'rolling_type_id': self.cmb_type.currentData(),
             'size': (f"{self.le_dim1.text()}×{self.le_dim2.text()}"
                      if self.cmb_type.currentText() in ("Лист", "Плита", "Труба")
@@ -273,12 +342,24 @@ class AddMaterialDialog(QDialog):
         }
 
     def _on_accept(self):
-        if not self.cmb_supplier.currentData():
-            QMessageBox.warning(self, "Ошибка", "Нужно выбрать поставщика.")
+        """Обрабатывает принятие диалога с валидацией через сервис."""
+        try:
+            # Собираем данные формы
+            form_data = {
+                'supplier_id': self.cmb_supplier.currentData(),
+                'order_num': self.cmb_custom_order.currentText() if self.chk_custom.isChecked() else self.le_order.text(),
+                'is_custom_order': self.chk_custom.isChecked(),
+                'rolling_type': self.cmb_type.currentText(),
+                'dim1': float(self.le_dim1.text() or 0),
+                'dim2': float(self.le_dim2.text() or 0)
+            }
+            
+            # Валидируем данные формы через сервис
+            self.materials_service.validate_material_form_data(form_data)
+            
+            # Если валидация прошла успешно, принимаем диалог
+            self.accept()
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка валидации", str(e))
             return
-        if (not self.le_order.hasAcceptableInput()
-                and not self.chk_custom.isChecked()):
-            QMessageBox.warning(self, "Ошибка",
-                                "Номер заказа должен быть формата 2025/003.")
-            return
-        self.accept()
