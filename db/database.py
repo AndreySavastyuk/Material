@@ -3,7 +3,13 @@
 import sqlite3
 import os
 import datetime
+import hashlib
+import bcrypt
+import logging
+from typing import Optional, Dict, Any, Tuple, List
 from config import load_config
+
+logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self, db_path=None):
@@ -85,6 +91,8 @@ class Database:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             login TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
+            password_bcrypt TEXT,
+            password_type TEXT DEFAULT 'sha256',
             role TEXT NOT NULL,
             name TEXT,
             salt TEXT NOT NULL DEFAULT ''
@@ -141,6 +149,13 @@ class Database:
         CREATE INDEX IF NOT EXISTS idx_lab_logs_req ON lab_logs(request_id);
         ''')
 
+        # Добавляем поля для bcrypt в таблицу Users
+        existing_users = {row['name'] for row in self.conn.execute("PRAGMA table_info(Users)")}
+        if 'password_bcrypt' not in existing_users:
+            self.conn.execute("ALTER TABLE Users ADD COLUMN password_bcrypt TEXT")
+        if 'password_type' not in existing_users:
+            self.conn.execute("ALTER TABLE Users ADD COLUMN password_type TEXT DEFAULT 'sha256'")
+
         existing = {row['name'] for row in self.conn.execute("PRAGMA table_info(Specimens)")}
         extras = {
             'test_type': "TEXT DEFAULT ''",  # 'Растяжение' или 'Ударный изгиб'
@@ -173,12 +188,7 @@ class Database:
         cur = self.conn.cursor()
         cur.execute("SELECT COUNT(*) FROM Users WHERE login='admin'")
         if cur.fetchone()[0] == 0:
-            import hashlib
-            pwd = hashlib.sha256('admin'.encode('utf-8')).hexdigest()
-            cur.execute(
-                "INSERT INTO Users(login, password_hash, role, name, salt) VALUES(?,?,?,?,?)",
-                ('admin', pwd, 'Администратор', 'Админ', '')
-            )
+            self.create_admin_user()
 
         # Убедимся, что в lab_requests есть колонки results_json и last_pdf_path
         existing_req = {col['name'] for col in cursor.execute("PRAGMA table_info(lab_requests)")}
@@ -223,8 +233,246 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_requests_status   ON lab_requests(status, archived);
                 ''')
 
-
         self.conn.commit()
+
+    def create_admin_user(self):
+        """
+        Создает администратора с паролем 'admin' используя bcrypt.
+        """
+        try:
+            # Создаем bcrypt хеш для пароля 'admin'
+            password_bcrypt = bcrypt.hashpw('admin'.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            
+            # Создаем SHA256 хеш для обратной совместимости
+            password_sha256 = hashlib.sha256('admin'.encode('utf-8')).hexdigest()
+            
+            cur = self.conn.cursor()
+            cur.execute(
+                """INSERT INTO Users(login, password_hash, password_bcrypt, password_type, role, name, salt) 
+                   VALUES(?,?,?,?,?,?,?)""",
+                ('admin', password_sha256, password_bcrypt, 'bcrypt', 'Администратор', 'Админ', '')
+            )
+            self.conn.commit()
+            logger.info("Создан пользователь admin с bcrypt паролем")
+        except Exception as e:
+            logger.error(f"Ошибка при создании администратора: {e}")
+            # Fallback к старому способу
+            pwd = hashlib.sha256('admin'.encode('utf-8')).hexdigest()
+            cur = self.conn.cursor()
+            cur.execute(
+                "INSERT INTO Users(login, password_hash, role, name, salt) VALUES(?,?,?,?,?)",
+                ('admin', pwd, 'Администратор', 'Админ', '')
+            )
+            self.conn.commit()
+
+    def verify_user(self, login: str, password: str) -> Optional[Dict[str, Any]]:
+        """
+        Проверяет пароль пользователя с обратной совместимостью.
+        Сначала проверяет bcrypt, потом SHA256.
+        
+        Args:
+            login: Логин пользователя
+            password: Пароль для проверки
+            
+        Returns:
+            Словарь с данными пользователя или None, если авторизация не удалась
+        """
+        cur = self.conn.cursor()
+        cur.execute(
+            """SELECT id, login, password_hash, password_bcrypt, password_type, role, name 
+               FROM Users WHERE login=?""", 
+            (login,)
+        )
+        row = cur.fetchone()
+        
+        if not row:
+            logger.warning(f"Пользователь {login} не найден")
+            return None
+            
+        user_data = {
+            'id': row['id'],
+            'login': row['login'],
+            'role': row['role'],
+            'name': row['name']
+        }
+        
+        password_type = row['password_type'] or 'sha256'
+        
+        # Проверяем bcrypt пароль
+        if password_type == 'bcrypt' and row['password_bcrypt']:
+            try:
+                if bcrypt.checkpw(password.encode('utf-8'), row['password_bcrypt'].encode('utf-8')):
+                    logger.info(f"Успешная авторизация пользователя {login} (bcrypt)")
+                    return user_data
+            except Exception as e:
+                logger.error(f"Ошибка при проверке bcrypt пароля для {login}: {e}")
+        
+        # Проверяем SHA256 пароль (обратная совместимость)
+        if row['password_hash']:
+            sha256_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
+            if sha256_hash == row['password_hash']:
+                logger.info(f"Успешная авторизация пользователя {login} (SHA256) - рекомендуется обновить пароль")
+                
+                # Автоматически обновляем пароль на bcrypt
+                self._upgrade_password_to_bcrypt(row['id'], password)
+                
+                return user_data
+        
+        logger.warning(f"Неверный пароль для пользователя {login}")
+        return None
+
+    def _upgrade_password_to_bcrypt(self, user_id: int, password: str) -> None:
+        """
+        Обновляет пароль пользователя на bcrypt.
+        
+        Args:
+            user_id: ID пользователя
+            password: Открытый пароль
+        """
+        try:
+            password_bcrypt = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            cur = self.conn.cursor()
+            cur.execute(
+                "UPDATE Users SET password_bcrypt = ?, password_type = 'bcrypt' WHERE id = ?",
+                (password_bcrypt, user_id)
+            )
+            self.conn.commit()
+            logger.info(f"Пароль пользователя (ID: {user_id}) обновлен на bcrypt")
+        except Exception as e:
+            logger.error(f"Ошибка при обновлении пароля на bcrypt для пользователя {user_id}: {e}")
+
+    def change_password(self, user_id: int, old_password: str, new_password: str) -> bool:
+        """
+        Изменяет пароль пользователя.
+        
+        Args:
+            user_id: ID пользователя
+            old_password: Текущий пароль
+            new_password: Новый пароль
+            
+        Returns:
+            True если пароль успешно изменен, False в противном случае
+        """
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT login, password_hash, password_bcrypt, password_type FROM Users WHERE id=?",
+            (user_id,)
+        )
+        row = cur.fetchone()
+        
+        if not row:
+            logger.error(f"Пользователь с ID {user_id} не найден")
+            return False
+        
+        login = row['login']
+        
+        # Проверяем текущий пароль
+        if not self._verify_password(row, old_password):
+            logger.warning(f"Неверный текущий пароль для пользователя {login}")
+            return False
+        
+        # Устанавливаем новый пароль
+        try:
+            new_password_bcrypt = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            cur.execute(
+                "UPDATE Users SET password_bcrypt = ?, password_type = 'bcrypt', password_hash = '' WHERE id = ?",
+                (new_password_bcrypt, user_id)
+            )
+            self.conn.commit()
+            logger.info(f"Пароль пользователя {login} успешно изменен")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при изменении пароля для пользователя {login}: {e}")
+            return False
+
+    def _verify_password(self, user_row: sqlite3.Row, password: str) -> bool:
+        """
+        Проверяет пароль пользователя по данным из БД.
+        
+        Args:
+            user_row: Строка с данными пользователя из БД
+            password: Пароль для проверки
+            
+        Returns:
+            True если пароль корректен, False в противном случае
+        """
+        password_type = user_row['password_type'] or 'sha256'
+        
+        # Проверяем bcrypt пароль
+        if password_type == 'bcrypt' and user_row['password_bcrypt']:
+            try:
+                return bcrypt.checkpw(password.encode('utf-8'), user_row['password_bcrypt'].encode('utf-8'))
+            except Exception:
+                return False
+        
+        # Проверяем SHA256 пароль (обратная совместимость)
+        if user_row['password_hash']:
+            sha256_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
+            return sha256_hash == user_row['password_hash']
+        
+        return False
+
+    def get_user_by_login(self, login: str) -> Optional[Dict[str, Any]]:
+        """
+        Получает данные пользователя по логину.
+        
+        Args:
+            login: Логин пользователя
+            
+        Returns:
+            Словарь с данными пользователя или None
+        """
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT id, login, role, name FROM Users WHERE login=?",
+            (login,)
+        )
+        row = cur.fetchone()
+        
+        if row:
+            return {
+                'id': row['id'],
+                'login': row['login'],
+                'role': row['role'],
+                'name': row['name']
+            }
+        return None
+
+    def create_user(self, login: str, password: str, role: str, name: str = None) -> Optional[int]:
+        """
+        Создает нового пользователя.
+        
+        Args:
+            login: Логин пользователя
+            password: Пароль
+            role: Роль пользователя
+            name: Имя пользователя (опционально)
+            
+        Returns:
+            ID созданного пользователя или None в случае ошибки
+        """
+        try:
+            # Создаем bcrypt хеш
+            password_bcrypt = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            
+            cur = self.conn.cursor()
+            cur.execute(
+                """INSERT INTO Users(login, password_hash, password_bcrypt, password_type, role, name, salt) 
+                   VALUES(?,?,?,?,?,?,?)""",
+                (login, '', password_bcrypt, 'bcrypt', role, name or login, '')
+            )
+            self.conn.commit()
+            
+            user_id = cur.lastrowid
+            logger.info(f"Создан пользователь {login} с ID {user_id}")
+            return user_id
+            
+        except sqlite3.IntegrityError:
+            logger.error(f"Пользователь с логином {login} уже существует")
+            return None
+        except Exception as e:
+            logger.error(f"Ошибка при создании пользователя {login}: {e}")
+            return None
 
     def get_materials(self):
         """
@@ -355,6 +603,7 @@ class Database:
         self.conn.execute('DELETE FROM Documents WHERE material_id=?', (material_id,))
         self.conn.execute('DELETE FROM Materials WHERE id=?', (material_id,))
         self.conn.commit()
+
     def acquire_lock(self, material_id: int, user_login: str) -> bool:
         """
         Попытаться захватить блокировку на material_id.
@@ -396,6 +645,479 @@ class Database:
         if row:
             return True, row['locked_by']
         return False, ''
+
+    # ============ Методы для работы с ролями и правами ============
+    
+    def get_user_roles(self, user_id: int) -> List[Dict[str, Any]]:
+        """
+        Получает все активные роли пользователя.
+        
+        Args:
+            user_id: ID пользователя
+            
+        Returns:
+            Список ролей пользователя
+        """
+        cur = self.conn.cursor()
+        cur.execute('''
+            SELECT r.id, r.name, r.display_name, r.description, ur.assigned_at, ur.expires_at
+            FROM user_roles ur
+            JOIN roles r ON ur.role_id = r.id
+            WHERE ur.user_id = ? AND ur.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > datetime('now'))
+            ORDER BY r.name
+        ''', (user_id,))
+        
+        roles = []
+        for row in cur.fetchall():
+            roles.append({
+                'id': row['id'],
+                'name': row['name'],
+                'display_name': row['display_name'],
+                'description': row['description'],
+                'assigned_at': row['assigned_at'],
+                'expires_at': row['expires_at']
+            })
+        return roles
+
+    def get_user_permissions(self, user_id: int) -> List[Dict[str, Any]]:
+        """
+        Получает все права пользователя через его роли.
+        
+        Args:
+            user_id: ID пользователя
+            
+        Returns:
+            Список прав пользователя
+        """
+        cur = self.conn.cursor()
+        cur.execute('''
+            SELECT DISTINCT p.id, p.name, p.display_name, p.description, p.category
+            FROM user_roles ur
+            JOIN roles r ON ur.role_id = r.id
+            JOIN role_permissions rp ON r.id = rp.role_id
+            JOIN permissions p ON rp.permission_id = p.id
+            WHERE ur.user_id = ? AND ur.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > datetime('now'))
+            ORDER BY p.category, p.name
+        ''', (user_id,))
+        
+        permissions = []
+        for row in cur.fetchall():
+            permissions.append({
+                'id': row['id'],
+                'name': row['name'],
+                'display_name': row['display_name'],
+                'description': row['description'],
+                'category': row['category']
+            })
+        return permissions
+
+    def user_has_permission(self, user_id: int, permission_name: str) -> bool:
+        """
+        Проверяет, есть ли у пользователя указанное право.
+        
+        Args:
+            user_id: ID пользователя
+            permission_name: Название права (например, 'materials.create')
+            
+        Returns:
+            True если право есть, False в противном случае
+        """
+        cur = self.conn.cursor()
+        cur.execute('''
+            SELECT COUNT(*) as count
+            FROM user_roles ur
+            JOIN roles r ON ur.role_id = r.id
+            JOIN role_permissions rp ON r.id = rp.role_id
+            JOIN permissions p ON rp.permission_id = p.id
+            WHERE ur.user_id = ? AND p.name = ? AND ur.is_active = 1
+            AND (ur.expires_at IS NULL OR ur.expires_at > datetime('now'))
+        ''', (user_id, permission_name))
+        
+        row = cur.fetchone()
+        return row['count'] > 0
+
+    def get_all_roles(self) -> List[Dict[str, Any]]:
+        """
+        Получает все роли в системе.
+        
+        Returns:
+            Список всех ролей
+        """
+        cur = self.conn.cursor()
+        cur.execute('''
+            SELECT id, name, display_name, description, is_system, created_at
+            FROM roles
+            ORDER BY name
+        ''')
+        
+        roles = []
+        for row in cur.fetchall():
+            roles.append({
+                'id': row['id'],
+                'name': row['name'],
+                'display_name': row['display_name'],
+                'description': row['description'],
+                'is_system': row['is_system'],
+                'created_at': row['created_at']
+            })
+        return roles
+
+    def get_all_permissions(self) -> List[Dict[str, Any]]:
+        """
+        Получает все права в системе.
+        
+        Returns:
+            Список всех прав
+        """
+        cur = self.conn.cursor()
+        cur.execute('''
+            SELECT id, name, display_name, description, category, is_system, created_at
+            FROM permissions
+            ORDER BY category, name
+        ''')
+        
+        permissions = []
+        for row in cur.fetchall():
+            permissions.append({
+                'id': row['id'],
+                'name': row['name'],
+                'display_name': row['display_name'],
+                'description': row['description'],
+                'category': row['category'],
+                'is_system': row['is_system'],
+                'created_at': row['created_at']
+            })
+        return permissions
+
+    def get_role_permissions(self, role_id: int) -> List[Dict[str, Any]]:
+        """
+        Получает все права роли.
+        
+        Args:
+            role_id: ID роли
+            
+        Returns:
+            Список прав роли
+        """
+        cur = self.conn.cursor()
+        cur.execute('''
+            SELECT p.id, p.name, p.display_name, p.description, p.category
+            FROM role_permissions rp
+            JOIN permissions p ON rp.permission_id = p.id
+            WHERE rp.role_id = ?
+            ORDER BY p.category, p.name
+        ''', (role_id,))
+        
+        permissions = []
+        for row in cur.fetchall():
+            permissions.append({
+                'id': row['id'],
+                'name': row['name'],
+                'display_name': row['display_name'],
+                'description': row['description'],
+                'category': row['category']
+            })
+        return permissions
+
+    def assign_role_to_user(self, user_id: int, role_id: int, assigned_by: int = None, expires_at: str = None) -> bool:
+        """
+        Назначает роль пользователю.
+        
+        Args:
+            user_id: ID пользователя
+            role_id: ID роли
+            assigned_by: ID пользователя, который назначает роль
+            expires_at: Дата истечения роли (опционально)
+            
+        Returns:
+            True если роль назначена успешно, False в противном случае
+        """
+        try:
+            cur = self.conn.cursor()
+            cur.execute('''
+                INSERT OR REPLACE INTO user_roles (user_id, role_id, assigned_by, expires_at, is_active)
+                VALUES (?, ?, ?, ?, 1)
+            ''', (user_id, role_id, assigned_by, expires_at))
+            self.conn.commit()
+            
+            # Логируем назначение роли
+            role_name = self.get_role_by_id(role_id)['name'] if self.get_role_by_id(role_id) else 'Unknown'
+            user_name = self.get_user_by_id(user_id)['login'] if self.get_user_by_id(user_id) else 'Unknown'
+            logger.info(f"Роль {role_name} назначена пользователю {user_name}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при назначении роли: {e}")
+            return False
+
+    def revoke_role_from_user(self, user_id: int, role_id: int) -> bool:
+        """
+        Отзывает роль у пользователя.
+        
+        Args:
+            user_id: ID пользователя
+            role_id: ID роли
+            
+        Returns:
+            True если роль отозвана успешно, False в противном случае
+        """
+        try:
+            cur = self.conn.cursor()
+            cur.execute('''
+                UPDATE user_roles 
+                SET is_active = 0 
+                WHERE user_id = ? AND role_id = ?
+            ''', (user_id, role_id))
+            self.conn.commit()
+            
+            # Логируем отзыв роли
+            role_name = self.get_role_by_id(role_id)['name'] if self.get_role_by_id(role_id) else 'Unknown'
+            user_name = self.get_user_by_id(user_id)['login'] if self.get_user_by_id(user_id) else 'Unknown'
+            logger.info(f"Роль {role_name} отозвана у пользователя {user_name}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при отзыве роли: {e}")
+            return False
+
+    def get_role_by_id(self, role_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Получает роль по ID.
+        
+        Args:
+            role_id: ID роли
+            
+        Returns:
+            Данные роли или None
+        """
+        cur = self.conn.cursor()
+        cur.execute('''
+            SELECT id, name, display_name, description, is_system, created_at
+            FROM roles
+            WHERE id = ?
+        ''', (role_id,))
+        
+        row = cur.fetchone()
+        if row:
+            return {
+                'id': row['id'],
+                'name': row['name'],
+                'display_name': row['display_name'],
+                'description': row['description'],
+                'is_system': row['is_system'],
+                'created_at': row['created_at']
+            }
+        return None
+
+    def get_role_by_name(self, role_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Получает роль по имени.
+        
+        Args:
+            role_name: Имя роли
+            
+        Returns:
+            Данные роли или None
+        """
+        cur = self.conn.cursor()
+        cur.execute('''
+            SELECT id, name, display_name, description, is_system, created_at
+            FROM roles
+            WHERE name = ?
+        ''', (role_name,))
+        
+        row = cur.fetchone()
+        if row:
+            return {
+                'id': row['id'],
+                'name': row['name'],
+                'display_name': row['display_name'],
+                'description': row['description'],
+                'is_system': row['is_system'],
+                'created_at': row['created_at']
+            }
+        return None
+
+    def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Получает пользователя по ID.
+        
+        Args:
+            user_id: ID пользователя
+            
+        Returns:
+            Данные пользователя или None
+        """
+        cur = self.conn.cursor()
+        cur.execute('''
+            SELECT id, login, role, name
+            FROM Users
+            WHERE id = ?
+        ''', (user_id,))
+        
+        row = cur.fetchone()
+        if row:
+            return {
+                'id': row['id'],
+                'login': row['login'],
+                'role': row['role'],
+                'name': row['name']
+            }
+        return None
+
+    def create_role(self, name: str, display_name: str, description: str = None) -> Optional[int]:
+        """
+        Создает новую роль.
+        
+        Args:
+            name: Имя роли (уникальное)
+            display_name: Отображаемое имя роли
+            description: Описание роли
+            
+        Returns:
+            ID созданной роли или None в случае ошибки
+        """
+        try:
+            cur = self.conn.cursor()
+            cur.execute('''
+                INSERT INTO roles (name, display_name, description, is_system)
+                VALUES (?, ?, ?, 0)
+            ''', (name, display_name, description))
+            self.conn.commit()
+            
+            role_id = cur.lastrowid
+            logger.info(f"Создана роль {name} с ID {role_id}")
+            return role_id
+            
+        except sqlite3.IntegrityError:
+            logger.error(f"Роль с именем {name} уже существует")
+            return None
+        except Exception as e:
+            logger.error(f"Ошибка при создании роли {name}: {e}")
+            return None
+
+    def create_permission(self, name: str, display_name: str, description: str = None, category: str = 'custom') -> Optional[int]:
+        """
+        Создает новое право.
+        
+        Args:
+            name: Имя права (уникальное)
+            display_name: Отображаемое имя права
+            description: Описание права
+            category: Категория права
+            
+        Returns:
+            ID созданного права или None в случае ошибки
+        """
+        try:
+            cur = self.conn.cursor()
+            cur.execute('''
+                INSERT INTO permissions (name, display_name, description, category, is_system)
+                VALUES (?, ?, ?, ?, 0)
+            ''', (name, display_name, description, category))
+            self.conn.commit()
+            
+            permission_id = cur.lastrowid
+            logger.info(f"Создано право {name} с ID {permission_id}")
+            return permission_id
+            
+        except sqlite3.IntegrityError:
+            logger.error(f"Право с именем {name} уже существует")
+            return None
+        except Exception as e:
+            logger.error(f"Ошибка при создании права {name}: {e}")
+            return None
+
+    def assign_permission_to_role(self, role_id: int, permission_id: int) -> bool:
+        """
+        Назначает право роли.
+        
+        Args:
+            role_id: ID роли
+            permission_id: ID права
+            
+        Returns:
+            True если право назначено успешно, False в противном случае
+        """
+        try:
+            cur = self.conn.cursor()
+            cur.execute('''
+                INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+                VALUES (?, ?)
+            ''', (role_id, permission_id))
+            self.conn.commit()
+            
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при назначении права роли: {e}")
+            return False
+
+    def revoke_permission_from_role(self, role_id: int, permission_id: int) -> bool:
+        """
+        Отзывает право у роли.
+        
+        Args:
+            role_id: ID роли
+            permission_id: ID права
+            
+        Returns:
+            True если право отозвано успешно, False в противном случае
+        """
+        try:
+            cur = self.conn.cursor()
+            cur.execute('''
+                DELETE FROM role_permissions
+                WHERE role_id = ? AND permission_id = ?
+            ''', (role_id, permission_id))
+            self.conn.commit()
+            
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при отзыве права у роли: {e}")
+            return False
+
+    def get_permissions_by_category(self, category: str) -> List[Dict[str, Any]]:
+        """
+        Получает права по категории.
+        
+        Args:
+            category: Категория прав
+            
+        Returns:
+            Список прав в категории
+        """
+        cur = self.conn.cursor()
+        cur.execute('''
+            SELECT id, name, display_name, description, category, is_system
+            FROM permissions
+            WHERE category = ?
+            ORDER BY name
+        ''', (category,))
+        
+        permissions = []
+        for row in cur.fetchall():
+            permissions.append({
+                'id': row['id'],
+                'name': row['name'],
+                'display_name': row['display_name'],
+                'description': row['description'],
+                'category': row['category'],
+                'is_system': row['is_system']
+            })
+        return permissions
+
+    def get_permission_categories(self) -> List[str]:
+        """
+        Получает все категории прав.
+        
+        Returns:
+            Список категорий прав
+        """
+        cur = self.conn.cursor()
+        cur.execute('SELECT DISTINCT category FROM permissions ORDER BY category')
+        return [row['category'] for row in cur.fetchall()]
 
     def close(self):
         if self.conn:

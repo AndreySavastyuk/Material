@@ -3,3 +3,4 @@ configparser
 python-telegram-bot>=13.7
 fpdf2
 qrcode[pil]
+bcrypt>=4.0.1
