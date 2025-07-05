@@ -1,0 +1,54 @@
+/* Общий стиль приложения в духе 1С */
+
+/* Базовый шрифт и размер */
+QWidget {
+font-family: "Segoe UI", "Arial", sans-serif;
+font-size: 11pt;
+}
+
+/* Фон основных окон */
+QMainWindow, QDialog {
+background-color: #f0f0f0;
+}
+
+/* Кнопки */
+QPushButton {
+background-color: #e7e7e7;
+border: 1px solid #a0a0a0;
+padding: 6px 12px;
+border-radius: 4px;
+}
+QPushButton:hover {
+background-color: #d0d0d0;
+}
+QPushButton:pressed {
+background-color: #c0c0c0;
+}
+
+/* Таблицы */
+QTableWidget {
+background-color: #f9f9f9;
+alternate-background-color: #ffffff;
+gridline-color: #d0d0d0;
+}
+QHeaderView::section {
+background-color: #d9d9d9;
+padding: 4px;
+border: 1px solid #a0a0a0;
+}
+
+/* Поля ввода */
+QLineEdit, QComboBox, QSpinBox, QTextEdit {
+border: 1px solid #a0a0a0;
+padding: 4px;
+border-radius: 2px;
+background-color: #ffffff;
+}
+
+/* Меню */
+QMenuBar, QMenu {
+background-color: #ededed;
+}
+QMenu::item:selected {
+background-color: #d0d0d0;
+}
