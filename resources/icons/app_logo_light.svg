@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+            <!-- Основа логотипа - стилизованные металлические листы -->
+            <defs>
+                <linearGradient id="metalGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#0078d4" stop-opacity="1"/>
+                    <stop offset="50%" stop-color="#106ebe" stop-opacity="1"/>
+                    <stop offset="100%" stop-color="#0078d4" stop-opacity="1"/>
+                </linearGradient>
+                <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feDropShadow dx="2" dy="2" stdDeviation="2" flood-color="#666666" flood-opacity="0.3"/>
+                </filter>
+            </defs>
+            
+            <!-- Задний металлический лист -->
+            <rect x="18" y="20" width="28" height="18" rx="2" ry="2" 
+                  fill="url(#metalGradient)" opacity="0.8" filter="url(#shadow)"/>
+            
+            <!-- Средний металлический лист -->
+            <rect x="14" y="16" width="28" height="18" rx="2" ry="2" 
+                  fill="url(#metalGradient)" opacity="0.9" filter="url(#shadow)"/>
+            
+            <!-- Передний металлический лист -->
+            <rect x="10" y="12" width="28" height="18" rx="2" ry="2" 
+                  fill="url(#metalGradient)" filter="url(#shadow)"/>
+            
+            <!-- Декоративные элементы - болты -->
+            <circle cx="14" cy="16" r="1.5" fill="#2b2b2b" opacity="0.6"/>
+            <circle cx="34" cy="16" r="1.5" fill="#2b2b2b" opacity="0.6"/>
+            <circle cx="14" cy="26" r="1.5" fill="#2b2b2b" opacity="0.6"/>
+            <circle cx="34" cy="26" r="1.5" fill="#2b2b2b" opacity="0.6"/>
+            
+            <!-- Текст или дополнительный элемент -->
+            <path d="M20 45 L32 50 L44 45 M32 50 L32 58" 
+                  stroke="#0078d4" stroke-width="2" fill="none" stroke-linecap="round"/>
+        </svg>

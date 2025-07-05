@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+            <!-- Шестеренка настроек -->
+            <circle cx="12" cy="12" r="3" fill="none" stroke="#0078d4" stroke-width="1.5"/>
+            
+            <!-- Зубцы шестеренки -->
+            <path d="M12 1 L12 6 M12 18 L12 23 M4.22 4.22 L7.76 7.76 M16.24 16.24 L19.78 19.78 
+                     M1 12 L6 12 M18 12 L23 12 M4.22 19.78 L7.76 16.24 M16.24 7.76 L19.78 4.22" 
+                  stroke="#0078d4" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>

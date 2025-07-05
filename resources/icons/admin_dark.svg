@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+            <!-- Шестеренка -->
+            <path d="M12 1 L15.09 8.26 L22 9 L17 14 L18.18 21 L12 17.77 L5.82 21 L7 14 L2 9 L8.91 8.26 L12 1 Z" 
+                  fill="none" stroke="#0e7afe" stroke-width="1.5"/>
+            
+            <!-- Центральный круг -->
+            <circle cx="12" cy="12" r="3" fill="none" stroke="#0e7afe" stroke-width="1.5"/>
+            
+            <!-- Внутренний круг -->
+            <circle cx="12" cy="12" r="1.5" fill="#0e7afe"/>
+        </svg>

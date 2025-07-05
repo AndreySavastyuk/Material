@@ -1,0 +1,87 @@
+{
+  "global": {
+    "enable_tooltips": true,
+    "show_delay": 800,
+    "hide_delay": 3000,
+    "max_width": 300,
+    "animation_duration": 200
+  },
+  "tooltips": {
+    "materials_table": {
+      "description": "Таблица материалов",
+      "content": "Здесь отображаются все материалы в системе. Вы можете сортировать, фильтровать и выполнять операции с материалами.",
+      "icon": "table",
+      "category": "main_interface"
+    },
+    "search_field": {
+      "description": "Поле поиска",
+      "content": "Введите текст для поиска материалов по названию, поставщику или другим параметрам.",
+      "icon": "search",
+      "category": "search"
+    },
+    "add_material_btn": {
+      "description": "Добавить материал",
+      "content": "Нажмите для добавления нового материала в систему. Требуется право 'materials.create'.",
+      "icon": "plus",
+      "category": "actions",
+      "requires_permission": "materials.create"
+    },
+    "refresh_btn": {
+      "description": "Обновить данные",
+      "content": "Обновляет список материалов из базы данных. Горячая клавиша: F5",
+      "icon": "refresh",
+      "category": "actions"
+    },
+    "menu_file": {
+      "description": "Меню 'Файл'",
+      "content": "Операции с файлами: создание, открытие, сохранение документов",
+      "icon": "file",
+      "category": "menu"
+    },
+    "menu_edit": {
+      "description": "Меню 'Правка'",
+      "content": "Операции редактирования: отмена, повтор, копирование",
+      "icon": "edit",
+      "category": "menu"
+    },
+    "menu_view": {
+      "description": "Меню 'Вид'",
+      "content": "Настройки отображения: полноэкранный режим, панели инструментов",
+      "icon": "view",
+      "category": "menu"
+    },
+    "menu_tools": {
+      "description": "Меню 'Инструменты'",
+      "content": "Дополнительные инструменты и утилиты системы",
+      "icon": "tools",
+      "category": "menu"
+    },
+    "menu_admin": {
+      "description": "Меню 'Администрирование'",
+      "content": "Административные функции: управление пользователями, справочниками",
+      "icon": "admin",
+      "category": "menu",
+      "requires_permission": "admin.access"
+    },
+    "menu_help": {
+      "description": "Меню 'Справка'",
+      "content": "Справочная информация и документация. Нажмите F1 для быстрого доступа",
+      "icon": "help",
+      "category": "menu"
+    }
+  },
+  "role_specific": {
+    "admin": {
+      "additional_content": "Как администратор, у вас есть полный доступ ко всем функциям системы."
+    },
+    "otk": {
+      "additional_content": "Как сотрудник ОТК, вы можете работать с контролем качества материалов."
+    },
+    "lab": {
+      "additional_content": "Как сотрудник лаборатории, вы можете создавать и редактировать протоколы испытаний."
+    },
+    "user": {
+      "additional_content": "Как пользователь, у вас есть доступ к основным функциям просмотра."
+    }
+  }
+} 

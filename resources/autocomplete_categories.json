@@ -1,0 +1,145 @@
+{
+  "categories": {
+    "material_name": {
+      "description": "Названия материалов",
+      "table": "materials",
+      "column": "name",
+      "weight": 1.0,
+      "min_length": 2,
+      "cache_duration": 300
+    },
+    "supplier": {
+      "description": "Поставщики",
+      "table": "suppliers",
+      "column": "name",
+      "weight": 0.9,
+      "min_length": 2,
+      "cache_duration": 600
+    },
+    "grade": {
+      "description": "Марки стали",
+      "table": "grades",
+      "column": "name",
+      "weight": 0.8,
+      "min_length": 1,
+      "cache_duration": 600
+    },
+    "size": {
+      "description": "Размеры",
+      "table": "sizes",
+      "column": "name",
+      "weight": 0.7,
+      "min_length": 1,
+      "cache_duration": 600
+    },
+    "rolling_type": {
+      "description": "Типы проката",
+      "table": "rolling_types",
+      "column": "name",
+      "weight": 0.6,
+      "min_length": 2,
+      "cache_duration": 600
+    },
+    "user_name": {
+      "description": "Имена пользователей",
+      "table": "users",
+      "column": "name",
+      "weight": 0.5,
+      "min_length": 2,
+      "cache_duration": 300,
+      "requires_permission": "users.view"
+    }
+  },
+  "global_settings": {
+    "max_suggestions": 10,
+    "fuzzy_threshold": 0.6,
+    "history_weight": 1.2,
+    "database_weight": 1.0,
+    "learning_enabled": true,
+    "save_user_history": true,
+    "history_file": "user_autocomplete_history.json"
+  },
+  "ui_settings": {
+    "show_category": true,
+    "show_source": false,
+    "max_popup_height": 200,
+    "item_height": 25,
+    "highlight_color": "#3498db",
+    "animation_duration": 150
+  },
+  "field_mappings": {
+    "material_name_field": {
+      "categories": ["material_name"],
+      "fallback_categories": ["supplier", "grade"]
+    },
+    "supplier_field": {
+      "categories": ["supplier"],
+      "fallback_categories": ["material_name"]
+    },
+    "grade_field": {
+      "categories": ["grade"],
+      "fallback_categories": ["material_name"]
+    },
+    "size_field": {
+      "categories": ["size"],
+      "fallback_categories": ["rolling_type"]
+    },
+    "user_field": {
+      "categories": ["user_name"],
+      "fallback_categories": []
+    },
+    "search_field": {
+      "categories": ["material_name", "supplier", "grade", "size"],
+      "fallback_categories": []
+    }
+  },
+  "sample_data": {
+    "material_name": [
+      "Лист горячекатаный",
+      "Труба стальная",
+      "Арматура строительная",
+      "Уголок стальной",
+      "Швеллер горячекатаный",
+      "Балка двутавровая",
+      "Полоса стальная",
+      "Круг стальной"
+    ],
+    "supplier": [
+      "ООО 'Металлургический завод'",
+      "АО 'Северсталь'",
+      "ПАО 'НЛМК'",
+      "ООО 'ММК-МЕТИЗ'",
+      "АО 'ЕВРАЗ НТМК'",
+      "ООО 'Уральская Сталь'"
+    ],
+    "grade": [
+      "09Г2С",
+      "Ст3сп",
+      "20",
+      "40Х",
+      "65Г",
+      "А500С",
+      "В500С",
+      "S235JR"
+    ],
+    "size": [
+      "10х1500х6000",
+      "12х1500х6000",
+      "16х1500х6000",
+      "20х1500х6000",
+      "∅10",
+      "∅12",
+      "∅16",
+      "∅20",
+      "∅25",
+      "∅32"
+    ],
+    "rolling_type": [
+      "Горячекатаный",
+      "Холоднокатаный",
+      "Оцинкованный",
+      "Нержавеющий",
+      "Легированный"
+    ]
+  }
+} 

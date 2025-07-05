@@ -1,0 +1,174 @@
+{
+  "hotkeys": {
+    "help": {
+      "key": "F1",
+      "description": "Открыть справку",
+      "category": "Справка",
+      "context": "global"
+    },
+    "refresh": {
+      "key": "F5",
+      "description": "Обновить данные",
+      "category": "Основные",
+      "context": "global"
+    },
+    "fullscreen": {
+      "key": "F11",
+      "description": "Полноэкранный режим",
+      "category": "Вид",
+      "context": "global"
+    },
+    "save": {
+      "key": "Ctrl+S",
+      "description": "Сохранить",
+      "category": "Файл",
+      "context": "global"
+    },
+    "new": {
+      "key": "Ctrl+N",
+      "description": "Создать новый",
+      "category": "Файл",
+      "context": "global"
+    },
+    "open": {
+      "key": "Ctrl+O",
+      "description": "Открыть",
+      "category": "Файл",
+      "context": "global"
+    },
+    "find": {
+      "key": "Ctrl+F",
+      "description": "Поиск",
+      "category": "Правка",
+      "context": "global"
+    },
+    "undo": {
+      "key": "Ctrl+Z",
+      "description": "Отменить",
+      "category": "Правка",
+      "context": "global"
+    },
+    "redo": {
+      "key": "Ctrl+Y",
+      "description": "Повторить",
+      "category": "Правка",
+      "context": "global"
+    },
+    "copy": {
+      "key": "Ctrl+C",
+      "description": "Копировать",
+      "category": "Правка",
+      "context": "global"
+    },
+    "paste": {
+      "key": "Ctrl+V",
+      "description": "Вставить",
+      "category": "Правка",
+      "context": "global"
+    },
+    "cut": {
+      "key": "Ctrl+X",
+      "description": "Вырезать",
+      "category": "Правка",
+      "context": "global"
+    },
+    "select_all": {
+      "key": "Ctrl+A",
+      "description": "Выделить все",
+      "category": "Правка",
+      "context": "global"
+    },
+    "print": {
+      "key": "Ctrl+P",
+      "description": "Печать",
+      "category": "Файл",
+      "context": "global"
+    },
+    "exit": {
+      "key": "Alt+F4",
+      "description": "Выход",
+      "category": "Файл",
+      "context": "global"
+    },
+    "delete": {
+      "key": "Delete",
+      "description": "Удалить выбранный элемент",
+      "category": "Основные",
+      "context": "table"
+    },
+    "edit": {
+      "key": "Enter",
+      "description": "Редактировать выбранный элемент",
+      "category": "Основные",
+      "context": "table"
+    },
+    "settings": {
+      "key": "Ctrl+,",
+      "description": "Настройки",
+      "category": "Инструменты",
+      "context": "global"
+    },
+    "admin_panel": {
+      "key": "Ctrl+Shift+A",
+      "description": "Панель администратора",
+      "category": "Администрирование",
+      "context": "global",
+      "requires_permission": "admin.access"
+    },
+    "otk_window": {
+      "key": "Ctrl+Shift+O",
+      "description": "Окно ОТК",
+      "category": "Модули",
+      "context": "global",
+      "requires_permission": "otk.access"
+    },
+    "lab_window": {
+      "key": "Ctrl+Shift+L",
+      "description": "Окно лаборатории",
+      "category": "Модули",
+      "context": "global",
+      "requires_permission": "lab.access"
+    },
+    "audit_window": {
+      "key": "Ctrl+Shift+U",
+      "description": "Окно аудита",
+      "category": "Администрирование",
+      "context": "global",
+      "requires_permission": "audit.view"
+    }
+  },
+  "categories": {
+    "Файл": {
+      "description": "Операции с файлами",
+      "icon": "file"
+    },
+    "Правка": {
+      "description": "Операции редактирования",
+      "icon": "edit"
+    },
+    "Вид": {
+      "description": "Настройки отображения",
+      "icon": "view"
+    },
+    "Основные": {
+      "description": "Основные операции",
+      "icon": "key"
+    },
+    "Справка": {
+      "description": "Справочная информация",
+      "icon": "help"
+    },
+    "Инструменты": {
+      "description": "Дополнительные инструменты",
+      "icon": "tools"
+    },
+    "Администрирование": {
+      "description": "Административные функции",
+      "icon": "admin"
+    },
+    "Модули": {
+      "description": "Специализированные модули",
+      "icon": "module"
+    }
+  }
+} 

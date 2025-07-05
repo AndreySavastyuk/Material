@@ -1282,3 +1282,12 @@ class Database:
     def close(self):
         if self.conn:
             self.conn.close()
+
+
+def get_connection():
+    """
+    Возвращает соединение с базой данных для использования в модулях графиков.
+    Создает новый экземпляр Database и возвращает его соединение.
+    """
+    db = Database()
+    return db.connect()

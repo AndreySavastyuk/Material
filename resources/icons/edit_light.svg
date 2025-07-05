@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+            <!-- Карандаш -->
+            <path d="M17 3 L21 7 L13 15 L9 15 L9 11 L17 3 Z" 
+                  fill="none" stroke="#ffc107" stroke-width="2" stroke-linejoin="round"/>
+            <line x1="16" y1="5" x2="19" y2="8" stroke="#ffc107" stroke-width="2"/>
+        </svg>

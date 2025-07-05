@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+            <!-- Лупа -->
+            <circle cx="11" cy="11" r="8" fill="none" stroke="#0e7afe" stroke-width="2"/>
+            <path d="M21 21 L16.65 16.65" stroke="#0e7afe" stroke-width="2" stroke-linecap="round"/>
+        </svg>

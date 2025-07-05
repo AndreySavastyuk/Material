@@ -407,4 +407,128 @@ class BaseService(ABC):
         Returns:
             True если запись обновлена
         """
-        pass 
+        pass
+
+
+class BaseUtilityService:
+    """
+    Базовый класс для утилитарных сервисов (отчеты, экспорт, аналитика).
+    Не содержит абстрактных методов CRUD, предоставляет только общую функциональность.
+    """
+    
+    def __init__(self, db_connection: Optional[sqlite3.Connection] = None):
+        """
+        Инициализация утилитарного сервиса.
+        
+        Args:
+            db_connection: Соединение с базой данных (опционально)
+        """
+        self.db_connection = db_connection
+        self._logger = get_logger('services')
+    
+    def handle_db_error(self, error: Exception, operation: str) -> None:
+        """
+        Обработка ошибок базы данных.
+        
+        Args:
+            error: Исключение
+            operation: Описание операции
+            
+        Raises:
+            DatabaseError: Обработанное исключение
+        """
+        self._logger.error(f"Ошибка БД при {operation}: {error}")
+        
+        if isinstance(error, sqlite3.IntegrityError):
+            if "UNIQUE constraint failed" in str(error):
+                raise DuplicateRecordError(
+                    f"Запись с такими данными уже существует при {operation}",
+                    original_error=error,
+                    suggestions=[
+                        "Проверьте уникальность данных",
+                        "Используйте другие значения для уникальных полей"
+                    ]
+                )
+            else:
+                raise IntegrityConstraintError(
+                    f"Нарушение целостности данных при {operation}",
+                    original_error=error,
+                    suggestions=[
+                        "Проверьте корректность данных",
+                        "Убедитесь в соответствии данных ограничениям БД"
+                    ]
+                )
+        elif isinstance(error, sqlite3.OperationalError):
+            raise DatabaseError(
+                f"Ошибка выполнения операции с базой данных при {operation}",
+                original_error=error,
+                suggestions=[
+                    "Проверьте доступность базы данных",
+                    "Убедитесь в корректности SQL запроса"
+                ]
+            )
+        else:
+            raise DatabaseError(
+                f"Неизвестная ошибка базы данных при {operation}: {error}",
+                original_error=error,
+                suggestions=[
+                    "Обратитесь к администратору системы",
+                    "Проверьте логи для получения подробной информации"
+                ]
+            )
+    
+    def validate_required_fields(self, data: Dict[str, Any], required_fields: List[str]) -> None:
+        """
+        Валидация обязательных полей.
+        
+        Args:
+            data: Данные для валидации
+            required_fields: Список обязательных полей
+            
+        Raises:
+            RequiredFieldError: Если обязательное поле отсутствует
+        """
+        missing_fields = []
+        
+        for field in required_fields:
+            if field not in data or data[field] is None or data[field] == '':
+                missing_fields.append(field)
+        
+        if missing_fields:
+            if len(missing_fields) == 1:
+                raise RequiredFieldError(
+                    f"Отсутствует обязательное поле: {missing_fields[0]}",
+                    field_name=missing_fields[0]
+                )
+            else:
+                raise ValidationError(
+                    f"Отсутствуют обязательные поля: {', '.join(missing_fields)}",
+                    details={'missing_fields': missing_fields},
+                    suggestions=[f"Заполните поля: {', '.join(missing_fields)}"]
+                )
+    
+    def validate_date_format(self, data: Dict[str, Any], date_fields: List[str]) -> None:
+        """
+        Валидация формата даты (ISO: YYYY-MM-DD).
+        
+        Args:
+            data: Данные для валидации
+            date_fields: Список полей с датами
+            
+        Raises:
+            InvalidFormatError: Если формат даты неверный
+        """
+        for field in date_fields:
+            if field in data and data[field] is not None:
+                try:
+                    datetime.strptime(data[field], '%Y-%m-%d')
+                except ValueError:
+                    raise InvalidFormatError(
+                        f"Поле '{field}' должно быть в формате YYYY-MM-DD",
+                        field_name=field,
+                        field_value=data[field],
+                        suggestions=[
+                            "Используйте формат даты YYYY-MM-DD (например: 2023-12-31)",
+                            "Проверьте правильность введенной даты"
+                        ]
+                    ) 

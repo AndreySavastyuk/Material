@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+            <!-- График -->
+            <polyline points="3,20 7,14 11,18 15,10 21,16" fill="none" 
+                      stroke="#0e7afe" stroke-width="2" stroke-linecap="round"/>
+            
+            <!-- Оси -->
+            <line x1="3" y1="20" x2="21" y2="20" stroke="#cccccc" stroke-width="1"/>
+            <line x1="3" y1="4" x2="3" y2="20" stroke="#cccccc" stroke-width="1"/>
+            
+            <!-- Точки данных -->
+            <circle cx="7" cy="14" r="2" fill="#0e7afe"/>
+            <circle cx="11" cy="18" r="2" fill="#0e7afe"/>
+            <circle cx="15" cy="10" r="2" fill="#0e7afe"/>
+        </svg>

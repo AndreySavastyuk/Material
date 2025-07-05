@@ -33,9 +33,18 @@ from gui.lab.lab_window import LabWindow
 from gui.audit.audit_window import AuditWindow
 from gui.settings.settings_window import SettingsWindow
 from gui.defects.defects_window import DefectsWindow
+from gui.reports.reports_window import ReportsWindow
 from utils.decorators import require_permission, audit_action
 from utils.exceptions import InsufficientPermissionsError
 from logger import log_event
+
+# Импорты UX систем
+try:
+    from gui.utils.ux_integration import setup_ux_for_window
+    UX_SYSTEMS_AVAILABLE = True
+except ImportError as e:
+    print(f"UX системы недоступны: {e}")
+    UX_SYSTEMS_AVAILABLE = False
 
 
 class RoleBasedMainWindow(QMainWindow):
@@ -103,6 +112,9 @@ class RoleBasedMainWindow(QMainWindow):
         
         # Показываем информацию о пользователе
         self._show_user_info()
+        
+        # Инициализация UX систем
+        self._setup_ux_systems()
 
     def _load_user_permissions(self) -> Dict[str, bool]:
         """
@@ -182,6 +194,23 @@ class RoleBasedMainWindow(QMainWindow):
         
         status_text = f"{user_info} | {roles_info} | Прав: {permissions_count}"
         self.statusBar().showMessage(status_text)
+
+    def _setup_ux_systems(self):
+        """Инициализирует UX системы для главного окна."""
+        if not UX_SYSTEMS_AVAILABLE:
+            return
+            
+        try:
+            # Определяем роль пользователя для UX систем
+            primary_role = self.user_roles[0] if self.user_roles else 'user'
+            
+            # Настраиваем UX системы для окна
+            setup_ux_for_window(self, primary_role)
+            
+            print(f"UX системы инициализированы для пользователя {self.user['login']} с ролью {primary_role}")
+            
+        except Exception as e:
+            print(f"Ошибка инициализации UX систем: {e}")
 
     def _setup_auto_logout(self):
         """Настраивает систему автоматического logout."""
@@ -417,6 +446,14 @@ class RoleBasedMainWindow(QMainWindow):
         
         if self.has_permission('materials.view'):
             modules_menu.addAction('Журнал дефектов', lambda: self._open_defects())
+        
+        # Меню отчетов
+        reports_menu = menubar.addMenu('Отчеты')
+        
+        if self.has_permission('reports.view'):
+            reports_menu.addAction('Система отчетности', lambda: self._open_reports())
+        if self.has_permission('reports.advanced'):
+            reports_menu.addAction('Аналитические отчеты', lambda: self._open_analytics())
         
         # Меню пользователя
         user_menu = menubar.addMenu('Пользователь')
@@ -780,6 +817,26 @@ class RoleBasedMainWindow(QMainWindow):
             DefectsWindow(self).exec_()
         except Exception as e:
             QMessageBox.critical(self, 'Ошибка', f'Ошибка при открытии журнала дефектов: {e}')
+
+    def _open_reports(self):
+        """Открытие системы отчетности."""
+        if not self.require_permission_gui('reports.view', 'просмотра отчетов'):
+            return
+        try:
+            ReportsWindow(self.db.conn, self).show()
+        except Exception as e:
+            QMessageBox.critical(self, 'Ошибка', f'Ошибка при открытии системы отчетности: {e}')
+    
+    def _open_analytics(self):
+        """Открытие аналитических отчетов."""
+        if not self.require_permission_gui('reports.advanced', 'просмотра аналитических отчетов'):
+            return
+        try:
+            from gui.reports.analytics_window import AnalyticsWindow
+            analytics_window = AnalyticsWindow(self.db.conn, self)
+            analytics_window.show()
+        except Exception as e:
+            QMessageBox.critical(self, 'Ошибка', f'Ошибка при открытии аналитических отчетов: {e}')
 
     def _change_password(self):
         """Смена пароля пользователя."""

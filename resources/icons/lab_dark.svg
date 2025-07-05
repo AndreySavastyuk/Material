@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+            <!-- Колба -->
+            <path d="M8 2 L16 2 L16 8 L20 18 L4 18 L8 8 Z" 
+                  fill="none" stroke="#0e7afe" stroke-width="1.5" stroke-linejoin="round"/>
+            
+            <!-- Жидкость в колбе -->
+            <path d="M8.5 8.5 L19 17 L5 17 L8.5 8.5 Z" fill="#17a2b8" opacity="0.6"/>
+            
+            <!-- Пузырьки -->
+            <circle cx="10" cy="14" r="1" fill="#2b2b2b" opacity="0.8"/>
+            <circle cx="14" cy="12" r="0.8" fill="#2b2b2b" opacity="0.6"/>
+            <circle cx="16" cy="15" r="0.6" fill="#2b2b2b" opacity="0.7"/>
+        </svg>
