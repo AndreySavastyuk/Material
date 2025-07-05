@@ -20,6 +20,8 @@ from typing import Dict, List, Optional
 
 from db.database import Database
 from services.authorization_service import AuthorizationService
+from services.materials_service import MaterialsService
+from repositories.materials_repository import MaterialsRepository
 from gui.dialogs import AddMaterialDialog
 from gui.admin.suppliers import SuppliersAdmin
 from gui.admin.grades import GradesAdmin
@@ -47,12 +49,13 @@ class RoleBasedMainWindow(QMainWindow):
     - Аудит действий пользователей
     """
     
-    def __init__(self, user: Dict):
+    def __init__(self, user: Dict, auth_service: 'AuthorizationService' = None):
         """
         Инициализация главного окна.
         
         Args:
             user: Данные пользователя с полями id, login, role, name
+            auth_service: Сервис авторизации (если не передан, создается новый)
         """
         super().__init__()
         
@@ -61,11 +64,19 @@ class RoleBasedMainWindow(QMainWindow):
         self.current_user_id = user['id']
         
         # Инициализируем сервисы
-        self.db = Database()
-        self.db.connect()
+        if auth_service:
+            self.auth_service = auth_service
+            self.db = auth_service.db
+        else:
+            self.db = Database()
+            self.db.connect()
+            self.auth_service = AuthorizationService(self.db)
+        
         self.db.docs_root = r"D:\mes"
         
-        self.auth_service = AuthorizationService(self.db)
+        # Инициализация сервиса материалов
+        self.materials_repo = MaterialsRepository(self.db.conn, self.db.docs_root)
+        self.materials_service = MaterialsService(self.materials_repo)
         
         # Загружаем права пользователя
         self.user_permissions = self._load_user_permissions()
@@ -82,7 +93,7 @@ class RoleBasedMainWindow(QMainWindow):
         self._load()
         
         # Таймер обновления
-        self._last_count = len(self.db.get_materials())
+        self._last_count = len(self.materials_service.get_all_materials())
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self._on_poll)
         self._refresh_timer.start(5000)
@@ -311,49 +322,42 @@ class RoleBasedMainWindow(QMainWindow):
 
     def _cancel_auto_logout(self):
         """Отменяет автоматический logout."""
-        # Останавливаем все таймеры
-        self._warning_timer.stop()
-        if hasattr(self, '_countdown_timer'):
-            self._countdown_timer.stop()
-        
-        # Закрываем диалог
-        if self._warning_dialog:
-            self._warning_dialog.close()
-            self._warning_dialog = None
-        
         # Сбрасываем таймер неактивности
         self._reset_inactivity_timer()
         
-        log_event('info', f'Пользователь {self.user["login"]} отменил автоматический выход')
-
-    def _perform_auto_logout(self):
-        """Выполняет автоматический logout."""
-        # Останавливаем все таймеры
-        self._inactivity_timer.stop()
-        self._warning_timer.stop()
-        if hasattr(self, '_countdown_timer'):
-            self._countdown_timer.stop()
-        
-        # Закрываем диалог
+        # Закрываем диалог предупреждения
         if self._warning_dialog:
             self._warning_dialog.close()
             self._warning_dialog = None
         
-        # Логируем автоматический выход
-        log_event('info', f'Автоматический выход пользователя {self.user["login"]} из-за неактивности')
-        
-        # Выполняем logout через сервис авторизации
-        session_token = self.user.get('session_token')
-        self.auth_service.logout_user(self.current_user_id, session_token)
-        
-        # Показываем сообщение и закрываем окно
-        QMessageBox.information(
-            self,
-            'Автоматический выход',
-            'Вы были автоматически выведены из системы из-за неактивности.'
-        )
-        
-        self.close()
+        # Логируем отмену автоматического выхода
+        log_event(self.user, 'cancel_auto_logout', 0, f'Пользователь {self.user["login"]} отменил автоматический выход')
+
+    def _perform_auto_logout(self):
+        """Выполняет автоматический logout."""
+        try:
+            # Инвалидируем сессию
+            session_token = self.user.get('session_token')
+            if session_token:
+                self.auth_service.logout_user(self.current_user_id, session_token)
+                
+            # Логируем автоматический выход
+            log_event(self.user, 'auto_logout', 0, f'Автоматический выход пользователя {self.user["login"]} из-за неактивности')
+            
+            # Показываем сообщение пользователю
+            QMessageBox.information(
+                self,
+                'Автоматический выход',
+                'Сессия завершена из-за длительного бездействия.\n'
+                'Пожалуйста, войдите в систему заново.'
+            )
+            
+            # Закрываем приложение
+            self.close()
+            
+        except Exception as e:
+            log_event(self.user, 'app_close_error', 0, f"Ошибка при автоматическом выходе: {e}")
+            QMessageBox.critical(self, 'Ошибка', f'Ошибка при автоматическом выходе: {e}')
 
     def eventFilter(self, obj, event):
         """Фильтр событий для отслеживания активности пользователя."""
@@ -494,20 +498,30 @@ class RoleBasedMainWindow(QMainWindow):
             return
             
         try:
-            rows = rows if rows is not None else self.db.get_materials()
+            if rows is None:
+                # Получаем материалы через сервис с форматированием
+                materials = self.materials_service.get_all_materials()
+                rows = self.materials_service.format_materials_for_display(materials)
+            
             self.tbl.setRowCount(len(rows))
             
             for i, r in enumerate(rows):
-                # Форматирование дат
-                arr_date = QDate.fromString(r['arrival_date'], 'yyyy-MM-dd').toString('dd.MM.yyyy')
-                cert_date = QDate.fromString(r['cert_date'], 'yyyy-MM-dd').toString('dd.MM.yyyy')
-                
+                # Используем отформатированные данные
                 vals = [
-                    arr_date, r['supplier'], r['order_num'], r['grade'],
-                    r['rolling_type'], r['size'], r['cert_num'], cert_date,
-                    r['batch'], r['heat_num'], f"{r['volume_length_mm']:.0f}",
-                    f"{r['volume_weight_kg']:.0f}", r['otk_remarks'] or '',
-                    'Да' if r['needs_lab'] else ''
+                    r.get('arrival_date_display', r.get('arrival_date', '')),
+                    r.get('supplier', ''),
+                    r.get('order_num', ''),
+                    r.get('grade', ''),
+                    r.get('rolling_type', ''),
+                    r.get('size', ''),
+                    r.get('cert_num', ''),
+                    r.get('cert_date_display', r.get('cert_date', '')),
+                    r.get('batch', ''),
+                    r.get('heat_num', ''),
+                    r.get('volume_length_display', '0'),
+                    r.get('volume_weight_display', '0'),
+                    r.get('otk_remarks_display', ''),
+                    r.get('needs_lab_display', '')
                 ]
                 
                 for j, v in enumerate(vals):
@@ -516,7 +530,7 @@ class RoleBasedMainWindow(QMainWindow):
                     self.tbl.setItem(i, j, item)
                 
                 # Помечаем удаленные материалы
-                if r['to_delete']:
+                if r.get('to_delete'):
                     for col in range(self.tbl.columnCount()):
                         itm = self.tbl.item(i, col)
                         itm.setBackground(QColor(200, 200, 200, 128))
@@ -533,25 +547,19 @@ class RoleBasedMainWindow(QMainWindow):
         if not self.has_permission('materials.view'):
             return
             
-        txt = text.strip().lower()
-        if len(txt) < 2:
-            self._load()
-            return
-            
         try:
-            filtered = []
-            for r in self.db.get_materials():
-                hay = ' '.join([
-                    str(r['supplier']), str(r['cert_num']),
-                    str(r['heat_num']), str(r['batch']),
-                    str(r['grade']), str(r['rolling_type']),
-                    str(r['order_num']), str(r['size'])
-                ]).lower()
-                if txt in hay:
-                    filtered.append(r)
+            txt = text.strip()
+            if len(txt) < 2:
+                self._load()
+                return
+            
+            # Используем сервис для поиска с форматированием
+            filtered = self.materials_service.search_materials_with_formatting(txt)
             self._load(filtered)
+            
         except Exception as e:
-            QMessageBox.critical(self, 'Ошибка поиска', f'Ошибка при поиске: {e}')
+            QMessageBox.warning(self, "Ошибка поиска", f"Ошибка поиска: {str(e)}")
+            self._load()  # Возвращаемся к полному списку
 
     def _show_context_menu(self, pos: QPoint):
         """Показывает контекстное меню с проверкой прав."""
@@ -563,7 +571,8 @@ class RoleBasedMainWindow(QMainWindow):
             return
             
         try:
-            materials = self.db.get_materials()
+            # Получаем материалы для определения ID
+            materials = self.materials_service.get_all_materials()
             if row >= len(materials):
                 return
                 
@@ -572,7 +581,7 @@ class RoleBasedMainWindow(QMainWindow):
             
             # Опции меню в зависимости от прав
             if self.has_permission('materials.delete'):
-                text = 'Снять метку' if mat['to_delete'] else 'Пометить на удаление'
+                text = 'Снять метку' if mat.get('to_delete') else 'Пометить на удаление'
                 delete_action = menu.addAction(text)
             else:
                 delete_action = None
@@ -602,7 +611,7 @@ class RoleBasedMainWindow(QMainWindow):
             QMessageBox.critical(self, 'Ошибка', f'Ошибка в контекстном меню: {e}')
 
     @audit_action('create', 'material')
-    def _add_material(self):
+    def _add_material(self, checked=False):
         """Добавление нового материала с проверкой прав."""
         if not self.require_permission_gui('materials.create', 'добавления материала'):
             return
@@ -612,9 +621,12 @@ class RoleBasedMainWindow(QMainWindow):
             dlg.setMinimumSize(800, 600)
             if dlg.exec_() == QDialog.Accepted:
                 data = dlg.data()
-                mid = self.db.add_material(**data)
-                log_event(self.user, 'add_material', mid, str(data))
-                QMessageBox.information(self, 'Готово', 'Материал добавлен')
+                
+                # Создаем материал через сервис
+                material_id = self.materials_service.create(data)
+                
+                log_event(self.user, 'add_material', material_id, str(data))
+                QMessageBox.information(self, 'Готово', f'Материал добавлен с ID: {material_id}')
                 self._load()
         except Exception as e:
             QMessageBox.critical(self, 'Ошибка', f'Ошибка при добавлении материала: {e}')
@@ -623,13 +635,24 @@ class RoleBasedMainWindow(QMainWindow):
     def _toggle_material_deletion(self, material: Dict):
         """Переключение метки удаления материала."""
         try:
-            mid = material['id']
+            material_id = material['id']
+            user_login = self.user.get('login', 'unknown')
+            
             if material['to_delete']:
-                self.db.unmark_material(mid)
-                log_event(self.user, 'unmark', mid, 'Снята метка')
+                success = self.materials_service.unmark_for_deletion(material_id, user_login)
+                if success:
+                    log_event(self.user, 'unmark', material_id, 'Снята метка')
+                    QMessageBox.information(self, "Успех", "Метка удаления снята")
+                else:
+                    QMessageBox.warning(self, "Ошибка", "Не удалось снять метку")
             else:
-                self.db.mark_material_for_deletion(mid)
-                log_event(self.user, 'mark', mid, 'Помечена удаление')
+                success = self.materials_service.mark_for_deletion(material_id, user_login)
+                if success:
+                    log_event(self.user, 'mark', material_id, 'Помечена на удаление')
+                    QMessageBox.information(self, "Успех", "Материал помечен на удаление")
+                else:
+                    QMessageBox.warning(self, "Ошибка", "Не удалось пометить на удаление")
+            
             self._load()
         except Exception as e:
             QMessageBox.critical(self, 'Ошибка', f'Ошибка при изменении метки удаления: {e}')
@@ -645,7 +668,13 @@ class RoleBasedMainWindow(QMainWindow):
     def _manual_refresh(self):
         """Ручное обновление данных."""
         if self.has_permission('materials.view'):
-            self._load()
+            try:
+                # Очищаем кеш справочников
+                self.materials_service.clear_cache()
+                self._load()
+                QMessageBox.information(self, "Обновление", "Данные обновлены")
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Ошибка обновления: {str(e)}")
 
     def _on_poll(self):
         """Периодическая проверка изменений."""
@@ -653,7 +682,7 @@ class RoleBasedMainWindow(QMainWindow):
             return
             
         try:
-            curr = len(self.db.get_materials())
+            curr = len(self.materials_service.get_all_materials())
             if curr != self._last_count:
                 # Можно подсветить кнопку Обновить
                 pass
@@ -809,7 +838,7 @@ class RoleBasedMainWindow(QMainWindow):
             session_token = self.user.get('session_token')
             if session_token:
                 self.auth_service.logout_user(self.current_user_id, session_token)
-                log_event('info', f'Пользователь {self.user["login"]} закрыл приложение')
+                log_event(self.user, 'app_close', 0, f'Пользователь {self.user["login"]} закрыл приложение')
             else:
                 # Fallback для старого API
                 self.auth_service.logout_user(self.current_user_id)
@@ -818,6 +847,6 @@ class RoleBasedMainWindow(QMainWindow):
             self.db.close()
             
         except Exception as e:
-            log_event('error', f"Ошибка при закрытии приложения: {e}")
+            log_event(self.user, 'app_close_error', 0, f"Ошибка при закрытии приложения: {e}")
         
         super().closeEvent(event) 
