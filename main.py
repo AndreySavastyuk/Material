@@ -1,15 +1,27 @@
-# main.py
+#!/usr/bin/env python
+"""
+Главный файл приложения с интеграцией системы ролей и прав доступа.
+"""
+
 import sys
 import os
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtCore import Qt
+
 from config import load_config
-from gui.main_window import MainWindow
+from gui.login_dialog import LoginDialog
+from gui.main_window_with_roles import RoleBasedMainWindow
+from db.database import Database
+from services.authorization_service import AuthorizationService
 from utils.logger import get_logger, setup_development_logging
+from utils.exceptions import AuthenticationError
+
 
 def main():
+    """Главная функция приложения."""
     # Инициализируем логирование
     logger = get_logger('main')
-    logger.info("Запуск приложения 'Система контроля материалов'")
+    logger.info("Запуск приложения 'Система контроля материалов' с системой ролей")
     
     # Настраиваем уровень логирования для разработки
     setup_development_logging()
@@ -30,7 +42,7 @@ def main():
     else:
         logger.warning(f"Файл стилей не найден: {qss_path}")
 
-    # Загружаем конфиг (например, пути к БД и документам)
+    # Загружаем конфиг
     try:
         cfg = load_config()
         logger.info("Конфигурация загружена успешно")
@@ -38,30 +50,75 @@ def main():
         logger.error(f"Ошибка загрузки конфигурации: {e}")
         cfg = {}
 
-    # В режиме отладки используем тестового администратора
-    user = {
-        'id': 1,
-        'login': 'admin',
-        'role': 'Администратор',
-        'name': 'Админ'
-    }
-    logger.info(f"Запуск с пользователем: {user['login']} ({user['role']})")
+    # Инициализируем базу данных и сервис авторизации
+    try:
+        db = Database()
+        db.connect()
+        auth_service = AuthorizationService(db)
+        logger.info("База данных и сервис авторизации инициализированы")
+    except Exception as e:
+        logger.critical(f"Ошибка инициализации базы данных: {e}")
+        QMessageBox.critical(None, "Ошибка", f"Не удалось подключиться к базе данных:\n{e}")
+        sys.exit(1)
+
+    # В режиме отладки можем использовать прямой вход
+    DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
+    
+    if DEBUG_MODE:
+        logger.info("Режим отладки - используем прямой вход для администратора")
+        try:
+            user = auth_service.authenticate_user('admin', 'admin')
+            logger.info(f"Отладочный вход выполнен: {user['login']}")
+        except AuthenticationError:
+            logger.warning("Не удалось выполнить отладочный вход, переходим к обычной авторизации")
+            user = None
+    else:
+        user = None
+
+    # Если пользователь не авторизован, показываем диалог входа
+    if not user:
+        login_dialog = LoginDialog(auth_service)
+        if login_dialog.exec_() == LoginDialog.Accepted:
+            user = login_dialog.get_authenticated_user()
+            session_token = login_dialog.get_session_token()
+            logger.info(f"Пользователь авторизован: {user['login']}, токен сессии: {session_token[:10]}...")
+        else:
+            logger.info("Авторизация отменена пользователем")
+            sys.exit(0)
+
+    # Получаем роли и права пользователя
+    user_roles = db.get_user_roles(user['id'])
+    user_permissions = db.get_user_permissions(user['id'])
+    
+    logger.info(f"Пользователь {user['login']} имеет {len(user_roles)} ролей и {len(user_permissions)} прав")
+    
+    # Логируем роли для отладки
+    role_names = [role['name'] for role in user_roles]
+    logger.info(f"Роли пользователя: {', '.join(role_names)}")
 
     try:
-        # Создаём и показываем главное окно
-        win = MainWindow(user)
+        # Создаём и показываем главное окно с системой ролей
+        win = RoleBasedMainWindow(user, auth_service)
         win.show()
-        logger.info("Главное окно создано и отображено")
+        logger.info("Главное окно с системой ролей создано и отображено")
 
         # Запускаем цикл обработки событий
         logger.info("Запуск главного цикла приложения")
         exit_code = app.exec_()
         logger.info(f"Приложение завершено с кодом: {exit_code}")
+        
+        # Закрываем соединение с базой данных
+        db.close()
+        logger.info("Соединение с базой данных закрыто")
+        
         sys.exit(exit_code)
         
     except Exception as e:
         logger.critical(f"Критическая ошибка при запуске приложения: {e}")
+        QMessageBox.critical(None, "Критическая ошибка", 
+                           f"Произошла критическая ошибка:\n{e}\n\nПриложение будет закрыто.")
         sys.exit(1)
+
 
 if __name__ == '__main__':
     main()
