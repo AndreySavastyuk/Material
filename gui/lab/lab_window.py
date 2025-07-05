@@ -15,8 +15,10 @@ from gui.lab.telegram_notifier import notify_request_passed, notify_material_def
 from gui.lab.request_editor import RequestEditor
 from gui.lab.specimen_catalog import SpecimenCatalogDialog
 from services.protocol_template_service import ProtocolTemplateService
+from services.statistics_service import StatisticsService
 from gui.lab.template_editor import TemplateManager
 from gui.lab.template_preview import show_protocol_preview
+from gui.lab.statistics_window import StatisticsWindow
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -30,8 +32,9 @@ class LabWindow(QMainWindow):
         self.user = parent.user
         self.db = Database(); self.db.connect()
         
-        # Инициализация сервиса шаблонов
+        # Инициализация сервисов
         self.template_service = ProtocolTemplateService(self.db.conn)
+        self.statistics_service = StatisticsService(self.db.conn)
 
         self.setWindowTitle('Модуль лаборатории (ЦЗЛ)')
         self.resize(900, 600)
@@ -63,6 +66,13 @@ class LabWindow(QMainWindow):
         reports_menu.addAction('Массовая генерация', self._batch_generate_protocols)
         reports_menu.addSeparator()
         reports_menu.addAction('Статистика по шаблонам', self._show_template_statistics)
+        
+        # Меню "Анализ"
+        analysis_menu = mb.addMenu('Анализ')
+        analysis_menu.addAction('Статистический анализ', self._open_statistics_window)
+        analysis_menu.addSeparator()
+        analysis_menu.addAction('Анализ трендов', self._analyze_trends)
+        analysis_menu.addAction('Сравнение партий', self._compare_batches)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -233,6 +243,11 @@ class LabWindow(QMainWindow):
         templates_submenu.addSeparator()
         templates_submenu.addAction('Экспорт в PDF (старый)', lambda: self._guard_dialog(self._export_pdf, rec))
         
+        # Подменю для статистического анализа
+        analysis_submenu = menu.addMenu('Анализ')
+        analysis_submenu.addAction('Статистический анализ', self._open_statistics_window)
+        analysis_submenu.addAction('Анализ по материалу', lambda: self._analyze_material_statistics(rec))
+        
         menu.addSeparator()
         menu.addAction('Отправить в Telegram', lambda: self._guard_dialog(self._send_to_telegram, rec))
         
@@ -373,7 +388,7 @@ class LabWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, 'Ошибка Telegram', str(e))
 
-    # Новые методы для работы с шаблонами
+    # Методы для работы с шаблонами
     def _manage_templates(self):
         """Открытие менеджера шаблонов."""
         try:
@@ -494,6 +509,188 @@ class LabWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Ошибка получения статистики: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось получить статистику: {e}")
+
+    # Методы для статистического анализа
+    def _open_statistics_window(self):
+        """Открытие окна статистического анализа."""
+        try:
+            dialog = StatisticsWindow(self.statistics_service, self)
+            dialog.exec_()
+        except Exception as e:
+            logger.error(f"Ошибка открытия окна статистики: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось открыть окно статистического анализа: {e}")
+
+    def _analyze_material_statistics(self, rec: dict):
+        """Анализ статистики по конкретному материалу."""
+        try:
+            # Открываем окно статистики с предустановленным материалом
+            dialog = StatisticsWindow(self.statistics_service, self)
+            
+            # Предварительно устанавливаем материал
+            material_grade = rec.get('material', '')
+            if material_grade:
+                # Ищем материал в комбобоксе и устанавливаем его
+                for i in range(dialog.material_combo.count()):
+                    if dialog.material_combo.itemText(i) == material_grade:
+                        dialog.material_combo.setCurrentIndex(i)
+                        break
+            
+            dialog.exec_()
+            
+        except Exception as e:
+            logger.error(f"Ошибка анализа статистики материала: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить анализ: {e}")
+
+    def _analyze_trends(self):
+        """Анализ трендов в результатах испытаний."""
+        try:
+            # Получаем список доступных тестов
+            tests = self.statistics_service.get_available_tests()
+            
+            if not tests:
+                QMessageBox.information(self, "Информация", "Нет доступных тестов для анализа трендов")
+                return
+            
+            # Диалог выбора теста для анализа тренда
+            test_name, ok = QInputDialog.getItem(
+                self, "Анализ трендов", "Выберите тест для анализа:", tests, 0, False
+            )
+            
+            if ok and test_name:
+                # Получаем данные за последние 90 дней
+                data = self.statistics_service.get_test_results_data(test_name, None, 90)
+                
+                if not data:
+                    QMessageBox.information(self, "Информация", f"Нет данных для теста '{test_name}'")
+                    return
+                
+                # Простой анализ тренда
+                values = [item['value'] for item in data]
+                
+                if len(values) < 3:
+                    QMessageBox.information(self, "Информация", "Недостаточно данных для анализа тренда")
+                    return
+                
+                # Расчет коэффициента корреляции с временем
+                import numpy as np
+                from scipy import stats as scipy_stats
+                
+                x = np.arange(len(values))
+                slope, intercept, r_value, p_value, std_err = scipy_stats.linregress(x, values)
+                
+                trend_info = f"""Анализ тренда для теста '{test_name}':
+
+Количество точек: {len(values)}
+Период: {data[0]['date']} - {data[-1]['date']}
+
+Коэффициент наклона: {slope:.6f}
+Коэффициент корреляции (R): {r_value:.4f}
+R² (детерминация): {r_value**2:.4f}
+P-значение: {p_value:.6f}
+Стандартная ошибка: {std_err:.6f}
+
+Интерпретация:
+"""
+                
+                if abs(r_value) > 0.7 and p_value < 0.05:
+                    if slope > 0:
+                        trend_info += "• Обнаружен статистически значимый возрастающий тренд"
+                    else:
+                        trend_info += "• Обнаружен статистически значимый убывающий тренд"
+                elif abs(r_value) > 0.3:
+                    trend_info += "• Присутствует слабый тренд, требуется дополнительное наблюдение"
+                else:
+                    trend_info += "• Тренд отсутствует, процесс стабилен"
+                
+                QMessageBox.information(self, "Результаты анализа тренда", trend_info)
+                
+        except Exception as e:
+            logger.error(f"Ошибка анализа трендов: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить анализ трендов: {e}")
+
+    def _compare_batches(self):
+        """Сравнение разных партий материала."""
+        try:
+            # Получаем список марок материалов
+            grades = self.statistics_service.get_material_grades()
+            
+            if len(grades) < 2:
+                QMessageBox.information(self, "Информация", "Недостаточно марок материалов для сравнения")
+                return
+            
+            # Диалог выбора марок для сравнения
+            grade1, ok1 = QInputDialog.getItem(
+                self, "Сравнение партий", "Выберите первую марку:", grades, 0, False
+            )
+            
+            if not ok1:
+                return
+            
+            remaining_grades = [g for g in grades if g != grade1]
+            grade2, ok2 = QInputDialog.getItem(
+                self, "Сравнение партий", "Выберите вторую марку:", remaining_grades, 0, False
+            )
+            
+            if not ok2:
+                return
+            
+            # Выбор теста для сравнения
+            tests = self.statistics_service.get_available_tests()
+            test_name, ok3 = QInputDialog.getItem(
+                self, "Сравнение партий", "Выберите тест для сравнения:", tests, 0, False
+            )
+            
+            if not ok3:
+                return
+            
+            # Получаем данные для обеих марок
+            data1 = self.statistics_service.get_test_results_data(test_name, grade1, 90)
+            data2 = self.statistics_service.get_test_results_data(test_name, grade2, 90)
+            
+            if not data1 or not data2:
+                QMessageBox.information(self, "Информация", "Недостаточно данных для сравнения")
+                return
+            
+            values1 = [item['value'] for item in data1]
+            values2 = [item['value'] for item in data2]
+            
+            # Расчет статистик
+            stats1 = self.statistics_service.calculate_basic_statistics(values1)
+            stats2 = self.statistics_service.calculate_basic_statistics(values2)
+            
+            # t-тест для сравнения средних
+            from scipy import stats as scipy_stats
+            t_stat, p_value = scipy_stats.ttest_ind(values1, values2)
+            
+            comparison_info = f"""Сравнение партий материалов:
+
+{grade1} (n={len(values1)}):
+• Среднее: {stats1.get('mean', 0):.3f}
+• СКО: {stats1.get('std', 0):.3f}
+• Медиана: {stats1.get('median', 0):.3f}
+
+{grade2} (n={len(values2)}):
+• Среднее: {stats2.get('mean', 0):.3f}
+• СКО: {stats2.get('std', 0):.3f}
+• Медиана: {stats2.get('median', 0):.3f}
+
+t-тест для сравнения средних:
+• t-статистика: {t_stat:.4f}
+• p-значение: {p_value:.6f}
+
+Вывод:
+"""
+            
+            if p_value < 0.05:
+                comparison_info += "• Различия между партиями статистически значимы (p < 0.05)"
+            else:
+                comparison_info += "• Различия между партиями не значимы (p ≥ 0.05)"
+            
+            QMessageBox.information(self, "Результаты сравнения партий", comparison_info)
+            
+        except Exception as e:
+            logger.error(f"Ошибка сравнения партий: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить сравнение партий: {e}")
 
     def closeEvent(self, event):
         try:

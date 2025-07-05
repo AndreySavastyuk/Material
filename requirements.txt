@@ -8,3 +8,7 @@ reportlab==4.2.5
 requests==2.32.3
 Jinja2==3.1.4
 MarkupSafe==2.1.5
+# Статистический анализ
+numpy>=1.26.0
+scipy>=1.13.0
+matplotlib>=3.8.0
